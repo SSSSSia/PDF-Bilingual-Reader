@@ -112,6 +112,32 @@ async fn ensure_backend_ready(state: &AppState) -> Result<(), String> {
     Err("FastAPI 后端未就绪（已等待 15 秒）".to_string())
 }
 
+/// 前端启动就绪门（2026-09-13）：sidecar onefile 首启解压+Defender 扫描可
+/// 能数十秒，前端等它再渲染会发请求的页面。Rust reqwest 探测（不走系统
+/// 代理的 webview 网络栈），timeout_ms 由前端给定（默认 120s）。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn backend_health(
+    state: State<'_, AppState>,
+    timeout_ms: Option<u64>,
+) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let timeout = timeout_ms.unwrap_or(120_000);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(resp) = client
+            .get(format!("{}/api/health", state.fastapi_url))
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                return Ok(());
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    }
+    Err("后端未就绪（等待超时）".to_string())
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub async fn run_pipeline(state: State<'_, AppState>, file_path: String) -> Result<String, String> {
     ensure_backend_ready(&state).await?;

@@ -33,6 +33,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::load_config,
             commands::save_config,
+            commands::backend_health,
             commands::run_pipeline,
             commands::get_pipeline_status,
             commands::check_file_exists,

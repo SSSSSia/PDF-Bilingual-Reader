@@ -71,6 +71,13 @@ if (Test-Path $outExe) {
 }
 
 # 5) 打包（uvicorn 需显式收集，否则运行期会缺模块；stderr 噪声处理同步骤 2）
+# pymupdf≥新版 layout 子模块的 onnx 资源（51MB）--collect-all 收不齐，
+# 缺失时 sidecar 启动即崩且 GUI 态无日志（2026-09-13 用户实测白屏门禁卡死
+# 根因）——显式 add-data；pymupdf4llm 同理整体收集
+$sitePkgs = & $Python -c "import sys, pathlib; print(next(p for p in sys.path if p.endswith('site-packages')))"
+Write-Host "      site-packages: $sitePkgs"
+$layoutRes = Join-Path $sitePkgs "pymupdf\layout\resources"
+if (-not (Test-Path $layoutRes)) { throw "未找到 pymupdf layout 资源目录: $layoutRes" }
 Write-Host "[4/5] 正在打包后端，请稍候（约 1-3 分钟）..."
 $ErrorActionPreference = "Continue"
 & $Python -m PyInstaller `
@@ -86,6 +93,8 @@ $ErrorActionPreference = "Continue"
     --hidden-import uvicorn.lifespan.on `
     --collect-all uvicorn `
     --collect-all PyMuPDF `
+    --collect-all pymupdf4llm `
+    --add-data "$layoutRes;pymupdf/layout/resources" `
     $backendEntry
 $pyiExit = $LASTEXITCODE
 $ErrorActionPreference = "Stop"
