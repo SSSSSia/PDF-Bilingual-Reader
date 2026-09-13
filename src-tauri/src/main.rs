@@ -80,6 +80,7 @@ fn main() {
                 // 旧 pdf-backend.exe 成孤儿占住 8000，导致本次 sidecar 绑定
                 // 失败 + 升级安装器写文件失败。只清自己名下的进程名，不碰
                 // 用户无关服务；dev 终端里的 .venv python 不受影响。
+                use std::os::windows::process::CommandExt;
                 let _ = std::process::Command::new("taskkill")
                     .args(["/F", "/IM", "pdf-backend.exe"])
                     .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
