@@ -75,6 +75,17 @@ fn main() {
                 use tauri_plugin_shell::ShellExt;
                 use tauri_plugin_shell::process::CommandEvent;
 
+                // 启动前清理残留 sidecar（2026-09-13 用户反馈"端口经常被占"）：
+                // 退出路径不全时（直接关窗/强杀/崩溃）RunEvent::Exit 不触发，
+                // 旧 pdf-backend.exe 成孤儿占住 8000，导致本次 sidecar 绑定
+                // 失败 + 升级安装器写文件失败。只清自己名下的进程名，不碰
+                // 用户无关服务；dev 终端里的 .venv python 不受影响。
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/IM", "pdf-backend.exe"])
+                    .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                    .output();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+
                 let handle = _app.handle().clone();
                 let sidecar = handle
                     .shell()
