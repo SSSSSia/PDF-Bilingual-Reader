@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "PDF双语阅读器",
-        "width": 1400,
-        "height": 900,
+        "width": 1152,
+        "height": 880,
         "minWidth": 900,
         "minHeight": 600,
         "visible": false,
