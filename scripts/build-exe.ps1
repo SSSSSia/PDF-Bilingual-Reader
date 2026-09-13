@@ -44,6 +44,18 @@ if (-not $SkipBackend) {
     Write-Host "==> [2/$steps] 构建内嵌后端 sidecar ..." -ForegroundColor Cyan
     powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1
 }
+else {
+    # 防呆（2026-09-13 实测踩坑）：-SkipBackend 跳过了含新端点的 sidecar，
+    # 装机后旧后端 404。后端源码比 sidecar 产物新时拒绝跳过。
+    $sidecar = Get-ChildItem (Join-Path $root "src-tauri\sidecar") -Filter "pdf-backend-*.exe" |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $backendNewest = Get-ChildItem (Join-Path $root "backend") -Recurse -Include "*.py" |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($sidecar -and $backendNewest -and $backendNewest.LastWriteTime -gt $sidecar.LastWriteTime) {
+        throw "-SkipBackend 不安全：backend 源码（$($backendNewest.Name) $($backendNewest.LastWriteTime)）比 sidecar 产物（$($sidecar.LastWriteTime)）新，请去掉 -SkipBackend 重新构建"
+    }
+    Write-Host "==> [2/$steps] 跳过 sidecar 构建（-SkipBackend，源码无更新）" -ForegroundColor Yellow
+}
 
 Write-Host "==> [3/$steps] 构建桌面应用 (tauri build) ..." -ForegroundColor Cyan
 # npm 需 Odd 转义链把 -c JSON 透传给 tauri CLI（直接引号会被 npm 剥掉）
