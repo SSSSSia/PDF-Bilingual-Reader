@@ -18,6 +18,7 @@ import {
   isTauri,
   openDoc,
   listRunningTranslations,
+  renameDoc,
 } from "../lib/bridge";
 import { useDocThumbnails } from "../hooks/useDocThumbnails";
 import type { DocMeta } from "../types";
@@ -60,11 +61,38 @@ export default function MainPage() {
   const [query, setQuery] = useState("");
   // 「移动到文件夹」菜单当前展开的文档（null = 关闭）
   const [menuDoc, setMenuDoc] = useState<DocMeta | null>(null);
+  // 行内重命名（2026-09-13 用户反馈：文章名字没法改）——卡片标题变输入框
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const thumbs = useDocThumbnails(docs);
 
   useEffect(() => {
     void fetchAll();
   }, [fetchAll]);
+
+  useEffect(() => {
+    if (renamingId) renameInputRef.current?.select();
+  }, [renamingId]);
+
+  const startRename = (doc: DocMeta) => {
+    setMenuDoc(null);
+    setRenameDraft(doc.title);
+    setRenamingId(doc.doc_id);
+  };
+
+  const commitRename = async () => {
+    const docId = renamingId;
+    const title = renameDraft.trim();
+    setRenamingId(null);
+    if (!docId || !title) return;
+    try {
+      await renameDoc(docId, title);
+      await fetchAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   // 自动跳转时机（2026-09-11 用户反馈：原「pages 首次非空」跳太早——后端
   // 逐页提取，多页文档首次 page 就绪仅 progress≈8-10，落进阅读页时原文
@@ -540,14 +568,31 @@ export default function MainPage() {
                     </div>
                   )}
                 </div>
-                {/* 标题（两行截断）+ 元信息 */}
+                {/* 标题（两行截断）+ 元信息；行内重命名态切换为输入框 */}
                 <div className="px-1 pb-1 pt-2.5">
-                  <p
-                    className="line-clamp-2 min-h-[2.5em] text-sm font-medium leading-snug text-slate-900 dark:text-slate-100"
-                    title={d.title}
-                  >
-                    {d.title}
-                  </p>
+                  {renamingId === d.doc_id ? (
+                    <input
+                      ref={renameInputRef}
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void commitRename();
+                        if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      onBlur={() => void commitRename()}
+                      onClick={(e) => e.stopPropagation()}
+                      maxLength={100}
+                      className="w-full rounded-md border border-blue-500 px-1.5 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-slate-800 dark:text-slate-100"
+                      aria-label="重命名文献"
+                    />
+                  ) : (
+                    <p
+                      className="line-clamp-2 min-h-[2.5em] text-sm font-medium leading-snug text-slate-900 dark:text-slate-100"
+                      title={d.title}
+                    >
+                      {d.title}
+                    </p>
+                  )}
                   <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
                     {d.translated_at} · {d.page_count} 页
                   </p>
@@ -590,6 +635,27 @@ export default function MainPage() {
                     }}
                   />
                   <div className="absolute right-4 top-11 z-30 w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startRename(d);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 transition-colors duration-150 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-3.5 w-3.5 shrink-0"
+                        aria-hidden="true"
+                      >
+                        <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />
+                      </svg>
+                      重命名
+                    </button>
                     <p className="px-3 py-1.5 text-xs font-semibold text-slate-400 dark:text-slate-500">
                       移动到文件夹
                     </p>

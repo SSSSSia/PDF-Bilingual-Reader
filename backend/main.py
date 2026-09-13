@@ -446,6 +446,20 @@ async def api_move_doc(payload: dict):
     return {"ok": True}
 
 
+@app.post("/api/docs/rename")
+async def api_rename_doc(payload: dict):
+    """改文献显示名（2026-09-13 用户反馈）：仅改索引标题，不动源文件。"""
+    import docs_index
+
+    doc_id = str(payload.get("doc_id") or "").strip()
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+    if not docs_index.rename_doc(settings.data_dir, doc_id, title):
+        raise HTTPException(status_code=404, detail="文档索引中不存在该记录")
+    return {"ok": True, "title": title[:100]}
+
+
 @app.post("/api/docs/open")
 async def api_open_doc(payload: dict):
     """按 doc_id 从缓存重建已翻译会话（阶段6-T3）：零 API 调用、秒开。

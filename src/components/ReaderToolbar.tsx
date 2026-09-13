@@ -54,10 +54,12 @@ export default function ReaderToolbar() {
     await saveTheme(next);
   };
 
+  // 选中态统一样式（2026-09-13 用户反馈：重排版组选中几乎不可见）——
+  // 与「原版PDF·左右对照」同款：白底胶囊 + 蓝字 + 细描边
   const segBtn = (active: boolean) =>
-    `rounded-md px-3 py-1 text-sm font-medium transition-colors duration-150 ${
+    `rounded-md px-3 py-1 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${
       active
-        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100"
+        ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-700 dark:text-blue-300 dark:ring-slate-600"
         : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
     }`;
 
@@ -130,11 +132,7 @@ export default function ReaderToolbar() {
                 : "original_bilingual"
             )
           }
-          className={`rounded-md px-3 py-1 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${
-            readerMode === "original_bilingual"
-              ? "bg-white text-blue-700 shadow-sm ring-1 ring-slate-200 dark:bg-slate-700 dark:text-blue-300 dark:ring-slate-600"
-              : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          }`}
+          className={segBtn(readerMode === "original_bilingual")}
         >
           左右对照
         </button>

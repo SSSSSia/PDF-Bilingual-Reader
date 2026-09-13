@@ -144,6 +144,11 @@ export async function moveDoc(docId: string, folderId: string | null): Promise<v
   await postJson(`${API_BASE}/api/docs/move`, { doc_id: docId, folder_id: folderId });
 }
 
+/** 改文献显示名（仅索引标题，不动源文件） */
+export async function renameDoc(docId: string, title: string): Promise<void> {
+  await postJson(`${API_BASE}/api/docs/rename`, { doc_id: docId, title });
+}
+
 /**
  * 前端日志上报（崩溃/未捕获异常）：落到后端 logs/frontend.log。
  * 打包 exe 后没有控制台，这是排查崩溃的主要线索。静默失败（日志上报

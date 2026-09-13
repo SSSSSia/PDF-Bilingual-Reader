@@ -164,3 +164,21 @@ def set_doc_folder(data_dir: str, doc_id: str, folder_id) -> bool:
     if hit:
         _atomic_write(data_dir, docs)
     return hit
+
+
+def rename_doc(data_dir: str, doc_id: str, title: str) -> bool:
+    """改文献显示名（2026-09-13 用户反馈：列表名字没法改）。仅改索引标题，
+    不动源文件；doc_id 不存在或标题为空返回 False。"""
+    title = str(title or "").strip()
+    if not title:
+        return False
+    docs = load_index(data_dir)
+    hit = False
+    for d in docs:
+        if d.get("doc_id") == doc_id:
+            d["title"] = title[:100]
+            hit = True
+            break
+    if hit:
+        _atomic_write(data_dir, docs)
+    return hit
