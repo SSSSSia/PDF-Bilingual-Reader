@@ -42,6 +42,30 @@ fn main() {
             commands::test_api_connection,
         ])
         .setup(|_app| {
+            // ── 窗口尺寸自适应（2026-09-13 用户反馈"启动页面太大"）────
+            // 1400x900 在小屏/缩放屏上超出可视区：钳制到工作区 90% 并居中
+            {
+                use tauri::Manager;
+                if let Some(win) = _app.get_webview_window("main") {
+                    if let Ok(Some(monitor)) = win.current_monitor() {
+                        let size = monitor.size();
+                        let scale = monitor.scale_factor();
+                        // 逻辑坐标 = 物理像素 / 缩放
+                        let max_w = (size.width as f64 / scale * 0.9).floor();
+                        let max_h = (size.height as f64 / scale * 0.9).floor();
+                        let cur = win.outer_size().unwrap_or_default();
+                        let cur_w = cur.width as f64 / scale;
+                        let cur_h = cur.height as f64 / scale;
+                        let new_w = cur_w.min(max_w);
+                        let new_h = cur_h.min(max_h);
+                        if (new_w - cur_w).abs() > 1.0 || (new_h - cur_h).abs() > 1.0 {
+                            let _ = win.set_size(tauri::LogicalSize::new(new_w, new_h));
+                        }
+                        let _ = win.center();
+                    }
+                }
+            }
+
             // ── 内嵌 FastAPI sidecar（决策 D1）──────────────────────────
             // release：打包了 pdf-backend.exe，由 Tauri 拉起本地 8000 端口。
             // dev    ：不拉起，沿用 scripts/dev-start.ps1 单独启动的后端，

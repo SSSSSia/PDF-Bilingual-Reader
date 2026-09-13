@@ -487,8 +487,7 @@ async def api_frontend_log(payload: dict):
     log_dir = os.path.join(settings.data_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{level}] {message}\n"
-    async with asyncio.to_thread(_append_frontend_log, log_dir, line):
-        pass
+    await asyncio.to_thread(_append_frontend_log, log_dir, line)
     return {"ok": True}
 
 

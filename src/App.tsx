@@ -81,7 +81,9 @@ function App() {
   // 后端就绪门（2026-09-13 用户实测首启永挂修复）：打包版 sidecar 是 66MB
   // onefile，首次启动需解压引导 + Defender 扫描新装 exe，可能耗时数十秒——
   // 此前文献库等首查失败无重试，永挂"加载文献库…"。就绪前全屏等待，
-  // 不渲染任何会发请求的页面。浏览器 dev 模式后端由脚本预先拉起，跳过。
+  // 不渲染任何会话发请求的页面。浏览器 dev 模式后端由脚本预先拉起，跳过。
+  // 注意：本组件的所有 hook 必须先于此早退声明（hook 数量跨渲染必须一致，
+  // 否则就绪翻转时 React 直接崩树——2026-09-13 打包版白屏根因）。
   const [backendReady, setBackendReady] = useState(!isTauri());
   useEffect(() => {
     if (!isTauri()) return;
@@ -97,12 +99,6 @@ function App() {
       alive = false;
     };
   }, []);
-
-  if (!backendReady) {
-    return (
-      <LoadingSpinner text="正在启动本地服务…（首次启动需初始化运行环境，约需半分钟）" />
-    );
-  }
 
   // 阶段11-T5 翻译任务自动重接管：F5 整页重载后前端 job_id 丢失，后端任务
   // 孤儿化继续跑。配置加载完成后查一次 running 列表，发现未完成任务弹自绘
@@ -160,6 +156,13 @@ function App() {
     };
     void discover(0);
   }, [configLoaded]);
+
+  // 就绪门：所有 hook 已声明完毕，此处早退安全（hook 数量跨渲染一致）
+  if (!backendReady) {
+    return (
+      <LoadingSpinner text="正在启动本地服务…（首次启动需初始化运行环境，约需半分钟）" />
+    );
+  }
 
   return (
     <ErrorBoundary>
