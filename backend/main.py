@@ -17,6 +17,38 @@ import uuid
 
 import httpx
 
+# 冻结态（PyInstaller）stderr/stdout 尽早落盘：onefile + GUI 子系统下若崩溃
+# 发生在任何日志管道建立之前将无任何痕迹（2026-09-13 排查 sidecar 段错误的
+# 教训）。放在模块顶部，让导入期崩溃也能留下遗言。
+if getattr(sys, "frozen", False):
+    try:
+        import faulthandler
+        import io
+
+        faulthandler.enable()  # 段错误等 native 崩溃时自动打印 Python 栈
+        _log_dir = os.path.join(
+            os.environ.get("APPDATA") or os.path.expanduser("~"),
+            "pdf-reader", "logs",
+        )
+        os.makedirs(_log_dir, exist_ok=True)
+        _log_f = open(
+            os.path.join(_log_dir, "backend-sidecar.log"), "ab", buffering=0
+        )
+        # TextIOWrapper 包装：raw 文件对象收不了 print 的 str（TypeError）
+        _log_t = io.TextIOWrapper(
+            _log_f, encoding="utf-8", errors="replace", line_buffering=True
+        )
+        sys.stdout = _log_t
+        sys.stderr = _log_t
+        os.dup2(_log_f.fileno(), 1)
+        os.dup2(_log_f.fileno(), 2)
+        _log_t.write(
+            f"\n===== sidecar 启动 {time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"pid={os.getpid()} =====\n"
+        )
+    except Exception:
+        pass  # 日志失败绝不阻断启动
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from pipeline.processor import (
@@ -560,28 +592,4 @@ async def api_export_babeldoc_cancel(job_id: str):
     return babeldoc_export.get_status(job_id)
 
 if __name__ == "__main__":
-    # 打包态（PyInstaller onefile，GUI 子系统）stdout/stderr 被 Tauri 收走后
-    # 只进 println!（release 无控制台等于丢失）——2026-09-13 sidecar 启动即崩
-    # （pymupdf layout 资源缺失）却无任何日志可查，血泪教训：冻结环境必须
-    # 把 stderr 落盘，启动崩溃才有迹可循。
-    if getattr(sys, "frozen", False):
-        try:
-            _log_dir = os.path.join(
-                os.environ.get("APPDATA") or os.path.expanduser("~"),
-                "pdf-reader", "logs",
-            )
-            os.makedirs(_log_dir, exist_ok=True)
-            _log_path = os.path.join(_log_dir, "backend-sidecar.log")
-            # 追加模式保留历史崩溃记录；启动时写分隔行便于定位会话
-            _log_f = open(_log_path, "ab", buffering=0)
-            sys.stdout = _log_f
-            sys.stderr = _log_f
-            os.dup2(_log_f.fileno(), 1)
-            os.dup2(_log_f.fileno(), 2)
-            _log_f.write(
-                f"\n===== sidecar 启动 {time.strftime('%Y-%m-%d %H:%M:%S')} "
-                f"pid={os.getpid()} =====\n".encode()
-            )
-        except Exception:
-            pass  # 日志失败绝不阻断启动
     uvicorn.run(app, host="127.0.0.1", port=8000)

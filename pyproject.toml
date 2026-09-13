@@ -9,6 +9,12 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-multipart>=0.0.6",
     "aiofiles>=23.0.0",
+    # 提取栈钉版本（2026-09-13 打包事故）：pymupdf4llm>=1.28 的 Layout 引擎
+    # 硬依赖 onnxruntime，PyInstaller onefile 冻结环境导入即原生段错误；
+    # 且输出结构与 textlayer 全部清洗规则的调优基线（classic）不符。
+    # 升级前必须过 backend/tests + tools/extraction_health.py 全量体检。
+    "pymupdf==1.26.4",
+    "pymupdf4llm==0.0.27",
 ]
 
 [[tool.uv.index]]

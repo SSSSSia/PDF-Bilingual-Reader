@@ -13,7 +13,19 @@ import re
 import unicodedata
 
 import pymupdf
-import pymupdf4llm
+
+# pymupdf/pymupdf4llm 版本钉扎在 1.26.4/0.0.27（2026-09-13 决策）：
+# pymupdf4llm≥1.28 引入的 Layout 引擎（onnx 版面模型）有两个致命问题——
+# ① helper 链无条件硬导入 onnxruntime，PyInstaller onefile 冻结环境原生
+#    段错误（msvcp140 运行库冲突类，collect-all 也压不住），打包版后端
+#    启动即崩（白屏+门禁卡死事故根因）；② 输出结构与全部 textlayer 清洗
+#    规则的调优基线（classic 管线）不同。0.0.27 天然 classic、无 onnxruntime
+#    依赖。sys.modules 桩防 pymupdf 侧未来自动导入 layout。
+import sys as _sys
+
+_sys.modules.setdefault("pymupdf.layout", None)
+
+import pymupdf4llm  # noqa: E402
 
 # 文本层字符数低于该阈值视为"无有效文本层"（扫描页/纯图片页），回退视觉 OCR
 MIN_TEXT_CHARS = 120
