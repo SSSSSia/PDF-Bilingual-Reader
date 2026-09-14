@@ -290,3 +290,133 @@ def test_finalize_md_inserts_ref_before_caption(tmp_path):
     assert out.count("![Figure](") == 1
     assert out.index("![Figure](") < out.index("Figure 1: A test figure caption.")
     assert "Tail paragraph." in out
+
+
+# ── 交叉校验降级（阶段12-T3）────────────────────────────────────────
+
+from cache.file_cache import ocr_key, read_cache, write_cache  # noqa: E402
+
+_GOOD_VLM_MD = (
+    "# Test Paper\n\nBody text paragraph that lives outside any figure "
+    "region.\n\nFigure 1: A test figure caption."
+)
+
+
+def test_verified_accepts_good_vlm(tmp_path):
+    pdf = str(tmp_path / "fig.pdf")
+    _make_figure_pdf(pdf)
+    cache_dir = str(tmp_path / "cache")
+    with patch(
+        "ocr.vlm_parse._vlm_call",
+        new=AsyncMock(side_effect=[(_GOOD_VLM_MD, "stop")]),
+    ):
+        out = asyncio.run(
+            vlm_parse.parse_page_verified(
+                pdf, 0, "hash1", str(tmp_path / "imgs"), _CFG, cache_dir
+            )
+        )
+    assert out["source"] == "vlm"
+    assert out["bag"] >= 0.90
+    assert out["md"].count("![Figure](") == 1
+    # 原始解析结果已落缓存（回归重放免重打 API）
+    raw = read_cache(cache_dir, ocr_key("hash1", 0, vlm_parse.VLM_PARSE_MODEL))
+    assert raw and raw["md"] == _GOOD_VLM_MD
+
+
+def test_verified_raw_cache_hit_skips_api(tmp_path):
+    pdf = str(tmp_path / "fig.pdf")
+    _make_figure_pdf(pdf)
+    cache_dir = str(tmp_path / "cache")
+    write_cache(
+        cache_dir,
+        ocr_key("hash1", 0, vlm_parse.VLM_PARSE_MODEL),
+        {"md": _GOOD_VLM_MD, "trunc": 0},
+    )
+    mock = AsyncMock()
+    with patch("ocr.vlm_parse._vlm_call", new=mock):
+        out = asyncio.run(
+            vlm_parse.parse_page_verified(
+                pdf, 0, "hash1", str(tmp_path / "imgs"), _CFG, cache_dir
+            )
+        )
+    mock.assert_not_awaited()
+    assert out["source"] == "vlm"
+
+
+def test_verified_falls_back_on_low_bag(tmp_path):
+    """VLM 输出低质（bag 远低于阈值）→ 整页回退现行 textlayer 提取。"""
+    pdf = str(tmp_path / "fig.pdf")
+    _make_figure_pdf(pdf)
+    with patch(
+        "ocr.vlm_parse._vlm_call",
+        new=AsyncMock(side_effect=[("完全无关的输出", "stop")]),
+    ):
+        out = asyncio.run(
+            vlm_parse.parse_page_verified(
+                pdf, 0, "hash2", str(tmp_path / "imgs"), _CFG, str(tmp_path / "cache")
+            )
+        )
+    assert out["source"] == "textlayer"
+    assert out["fallback_reason"] == "bag"
+    assert out["bag"] < 0.90
+    # 回退产物仍是完整文本层 markdown（正文/图注都在）
+    assert "Body text paragraph" in out["md"]
+    assert "Figure 1: A test figure caption" in out["md"]
+
+
+def test_verified_falls_back_on_api_error(tmp_path):
+    """VLM API 失败 → 不抛异常，回退 textlayer（任务不失败）。"""
+    pdf = str(tmp_path / "fig.pdf")
+    _make_figure_pdf(pdf)
+    with patch(
+        "ocr.vlm_parse._vlm_call",
+        new=AsyncMock(side_effect=RuntimeError("HTTP 500")),
+    ):
+        out = asyncio.run(
+            vlm_parse.parse_page_verified(
+                pdf, 0, "hash3", str(tmp_path / "imgs"), _CFG, str(tmp_path / "cache")
+            )
+        )
+    assert out["source"] == "textlayer"
+    assert out["fallback_reason"] == "empty"
+    assert "Body text paragraph" in out["md"]
+
+
+def test_verified_scanned_page_short_circuits(tmp_path):
+    blank = str(tmp_path / "blank.pdf")
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(blank)
+    doc.close()
+    mock = AsyncMock()
+    with patch("ocr.vlm_parse._vlm_call", new=mock):
+        out = asyncio.run(
+            vlm_parse.parse_page_verified(
+                blank, 0, "hash4", None, _CFG, str(tmp_path / "cache")
+            )
+        )
+    mock.assert_not_awaited()
+    assert out == {"scanned": True}
+
+
+def test_verified_short_truth_accepts_vlm(tmp_path):
+    """纯图页 truth 过短无从校验 → 直接接受 VLM 输出（无内容可损失）。"""
+    fig_only = str(tmp_path / "fig_only.pdf")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 50, 36))
+    page.insert_image(pymupdf.Rect(170, 130, 420, 310), stream=pix.tobytes("png"))
+    page.insert_textbox(pymupdf.Rect(170, 320, 420, 345), "Figure 1: caption only.")
+    doc.save(fig_only)
+    doc.close()
+    with patch(
+        "ocr.vlm_parse._vlm_call",
+        new=AsyncMock(side_effect=[("Figure 1: caption only.", "stop")]),
+    ):
+        out = asyncio.run(
+            vlm_parse.parse_page_verified(
+                fig_only, 0, "hash5", str(tmp_path / "imgs"),
+                _CFG, str(tmp_path / "cache"),
+            )
+        )
+    assert out["source"] == "vlm"

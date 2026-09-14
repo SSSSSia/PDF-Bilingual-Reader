@@ -26,6 +26,7 @@ import time
 import unicodedata
 import re
 from collections import Counter
+from contextlib import nullcontext
 
 import httpx
 import pymupdf
@@ -35,8 +36,10 @@ from ocr.textlayer import (
     _figure_inner_text_rects,
     _insert_figures,
     _snapshot_figures,
+    extract_page_md,
     MIN_TEXT_CHARS,
 )
+from cache.file_cache import ocr_key, read_cache, write_cache
 
 # 双栏判定的通栏块阈值：与 textlayer._column_reading_order 同口径
 _COL_WIDE = 0.55
@@ -263,3 +266,82 @@ def _finalize_md(prep: dict, md: str) -> str:
     return _insert_figures(
         md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
     )
+
+
+def _textlayer_fallback(file_path: str, pno: int, image_dir: str | None, prep: dict) -> str:
+    """整页回退现行文本层提取（阶段12-T3）。快照复用 prep 的产物，
+    不重复区域检测——降级路径与主路线同一份快照，行为自洽。"""
+    doc = pymupdf.open(file_path)
+    try:
+        return extract_page_md(
+            doc, file_path, pno, image_dir, prep["refs"], prep["regions"]
+        )
+    finally:
+        doc.close()
+
+
+async def parse_page_verified(
+    file_path: str,
+    pno: int,
+    pdf_hash: str,
+    image_dir: str | None,
+    config: dict,
+    cache_dir: str,
+    bag_threshold: float = 0.90,
+    sem: asyncio.Semaphore | None = None,
+) -> dict:
+    """数字页混合主路线（T1+T2+T3）：快照 → 遮罩解析 → 插回 → 交叉校验降级。
+
+    返回：
+      {"scanned": True}                          扫描页，调用方走视觉通道
+      {"md", "source": "vlm", "bag", "trunc"}    VLM 主路线通过
+      {"md", "source": "textlayer", "bag", "trunc", "fallback_reason"}
+
+    最坏情况 = 现行 textlayer 输出：bag 低于阈值 / 空输出 / API 失败均整页
+    回退（防幻觉兜底，任务绝不因 VLM 失败而失败）。truth 过短（近空页/
+    纯图页）无从校验，直接接受 VLM 输出——无内容可损失。
+
+    缓存两层：原始解析结果（未插快照引用）存 VLM_PARSE_MODEL 键，T5 调参
+    与回归重放免重打 API；最终页产物由调用方按 TEXT_LAYER_MODEL 键存
+    （熔断随管线版本走）。
+
+    sem：VLM 调用阶段的并发闸（免费档 RPM 保守值）。必须由调用方在其
+    事件循环内创建后传入（asyncio 原语跨 loop 复用会报错）；None = 不限。
+    """
+    prep = await asyncio.to_thread(_prepare, file_path, pno, image_dir)
+    if prep["scanned"]:
+        return {"scanned": True}
+
+    raw_key = ocr_key(pdf_hash, pno, VLM_PARSE_MODEL)
+    raw = read_cache(cache_dir, raw_key)
+    md_raw, trunc = (raw or {}).get("md", ""), (raw or {}).get("trunc", 0)
+    if not md_raw:
+        try:
+            # nullcontext 支持 async（3.10+）：sem 缺省时不限并发
+            async with (sem if sem is not None else nullcontext()):
+                res = await parse_page(
+                    file_path, pno, config, mask_regions=prep["regions"]
+                )
+            md_raw, trunc = res["md"], res["trunc"]
+            if md_raw:
+                write_cache(cache_dir, raw_key, {"md": md_raw, "trunc": trunc})
+        except Exception as e:
+            print(f"[vlm] p{pno + 1}: 结构化解析失败，回退文本层: {e}")
+
+    truth_n = norm(prep["truth"])
+    bag = bag_f1(norm(md_raw), truth_n) if md_raw and truth_n else 0.0
+    accept = bool(md_raw) and (len(truth_n) < 60 or bag >= bag_threshold)
+    if accept:
+        md = await asyncio.to_thread(_finalize_md, prep, md_raw)
+        return {"md": md, "source": "vlm", "bag": round(bag, 4), "trunc": trunc}
+    md = await asyncio.to_thread(
+        _textlayer_fallback, file_path, pno, image_dir, prep
+    )
+    reason = "empty" if not md_raw else ("no_truth" if not truth_n else "bag")
+    return {
+        "md": md,
+        "source": "textlayer",
+        "bag": round(bag, 4),
+        "trunc": trunc,
+        "fallback_reason": reason,
+    }
