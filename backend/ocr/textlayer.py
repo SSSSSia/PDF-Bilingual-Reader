@@ -380,11 +380,16 @@ def _merge_rects(rects: list, gap: float = 0.0) -> list:
     return rects
 
 
-def _figure_regions(page, debug: bool = False) -> list:
+def _figure_regions(page, debug: bool = False, extra_regions: list | None = None) -> list:
     """检测页面的图/表区域（栅格图 + 矢量绘图簇 + 表格统一处理）。
 
     表格也按图片快照（2026-09-06 用户决策：文本表格转 markdown 必错位；
     find_tables 的 bbox 直接作为候选区域，borderless/booktabs 表也能命中）。
+
+    extra_regions（阶段12-T9.2）：版面模型（DocLayout-YOLO）的 table/figure
+    区域矩形，作为额外候选并入同一条漏斗（合并/面积/文本密度过滤）——
+    无框表 find_tables 检不出，靠模型区域补位；与既有候选重叠时由
+    _merge_rects 的空隙合并天然去重。
 
     过滤规则：
     - 面积占比 [_MIN_FIG_RATIO, _MAX_FIG_RATIO]；
@@ -407,6 +412,8 @@ def _figure_regions(page, debug: bool = False) -> list:
         rects.extend(pymupdf.Rect(t.bbox) for t in page.find_tables().tables)
     except Exception:
         pass
+    if extra_regions:
+        rects.extend(pymupdf.Rect(r) for r in extra_regions)
     merged = _merge_rects(rects, gap=_MERGE_GAP)
     if debug:
         print(
@@ -529,12 +536,24 @@ def _absorb_header_lines(page, r) -> None:
         r.y0 = top - 2
 
 
-def _snapshot_figures(doc, page_num: int, image_dir: str, debug: bool = True) -> tuple[list[str], list]:
+def _snapshot_figures(
+    doc,
+    page_num: int,
+    image_dir: str,
+    debug: bool = True,
+    extra_regions: list | None = None,
+    table_regions: list | None = None,
+) -> tuple[list[str], list]:
     """把页面图表区域截图为 PNG，返回 (图片引用列表, 最终区域列表)。
 
     区域分类（2026-09-06 用户决策）：与 find_tables bbox 重叠 >50% 的判为
     表格，快照命名 tab_*；其余为图，命名 fig_*。表格的译制图改为"全文翻译
     完成后用户点按触发"（按需，不拖慢全文），sidecar 记录 kind 与源 PDF。
+
+    extra_regions/table_regions（阶段12-T9.2）：版面模型的 table/figure 区域
+    矩形——前者并入 _figure_regions 候选（无框表补位），后者并入 table_boxes
+    参与分类（模型判 table 的区域即使 find_tables 不认也命名 tab_*，
+    译制图按钮的语义才成立）。
 
     同时落盘 sidecar JSON（<fig>.json：区域坐标 + 图内逐行文字元数据），
     供译制图叠字使用。
@@ -550,11 +569,13 @@ def _snapshot_figures(doc, page_num: int, image_dir: str, debug: bool = True) ->
         table_boxes = [pymupdf.Rect(t.bbox) for t in page.find_tables().tables]
     except Exception:
         table_boxes = []
+    if table_regions:
+        table_boxes.extend(pymupdf.Rect(r) for r in table_regions)
     refs: list[str] = []
     final_regions: list = []
     pad = 3.0  # 快照外扩（pt）：实测 find_tables/绘图簇 bbox 会裁掉表格右缘
     # 最后一个数字（HippoRAG Table 5 "77.4" 只剩半个 "5"），小外扩零风险
-    for k, r0 in enumerate(_figure_regions(page, debug=debug)):
+    for k, r0 in enumerate(_figure_regions(page, debug=debug, extra_regions=extra_regions)):
         r = (r0 + (-pad, -pad, pad, pad)) & page.rect
         # 表头吸收：表格绘图簇从第一条横线开始，表头文本行悬在簇上方
         # （见 _absorb_header_lines docstring），并入区域统一截图+redact

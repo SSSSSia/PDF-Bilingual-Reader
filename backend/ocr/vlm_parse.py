@@ -13,7 +13,9 @@
   单栏页上下半；A/B 实测 0/12 页触发，作为保险存在）；
 - mask_regions：送 VLM 前对图表区域打白底遮罩（阶段12-T2 接入
   textlayer._snapshot_figures 的最终区域——表格维持 v5 快照决策，
-  区域内文字已由快照"原模原样"承载，VLM 不再重复识别/丢弃）。
+  区域内文字已由快照"原模原样"承载，VLM 不再重复识别/丢弃）；
+  T9.2 起遮罩扩展到版面模型 abandon 区域（版权/页眉/venue 佐料
+  不进解析视野），truth 同步扣除，输出段落再按区域文本兜底剔除。
 
 防幻觉兜底（交叉校验降级，T3）与快照插回（T2）在 parse_page_verified。
 缓存：原始解析结果存 ocr_key(pdf_hash, page, VLM_PARSE_MODEL)——T5 调参
@@ -36,6 +38,7 @@ from ocr.textlayer import (
     _column_reading_order,
     _figure_inner_text_rects,
     _insert_figures,
+    _md_norm,
     _snapshot_figures,
     extract_page_md,
     MIN_TEXT_CHARS,
@@ -45,10 +48,137 @@ from cache.file_cache import ocr_key, read_cache, write_cache
 # 双栏判定的通栏块阈值：与 textlayer._column_reading_order 同口径
 _COL_WIDE = 0.55
 
+# ── 版面模型区域消费（阶段12-T9.2）────────────────────────────────
+# DocLayout-YOLO 区域按 label 分类三用：
+#   table/figure → _figure_regions 额外候选（无框表快照补位）；
+#   abandon     → 送 VLM 前遮罩 + truth 扣除 + 输出段落剔除（三用同区域）；
+#   title       → 输出段落标题提升（页 0 最大 title→#，编号深度定级）。
+# 坐标全部为 PDF 点（layout_worker.py 已除回渲染倍率）。
+_FIG_LABELS = {"figure", "table"}
+_ABANDON_LABEL = "abandon"
+_TITLE_LABEL = "title"
+
+# 标题编号前缀："4"/"4.1"/"3.2.1"——点分段数决定层级（学界通用约定，
+# 非个案特调）：单段号 → ##、两段 → ###、三段 → ####；页 0 最大 title
+# 单独判 #（文档标题）；无编号（"Abstract"/"C. GraphRAG"）→ ##。
+_TITLE_NUM = re.compile(r"^\s*(\d+(?:\.\d+)*)[\s.:)]?")
+
+
+def _split_layout_regions(regions: list | None) -> dict:
+    """版面区域按 label 分类。返回 {fig: [Rect], table: [Rect],
+    abandon: [Rect], title: [{rect, conf}]}——畸形 bbox/空区域丢弃。"""
+    out = {"fig": [], "table": [], "abandon": [], "title": []}
+    for reg in regions or []:
+        label = reg.get("label")
+        bbox = reg.get("bbox")
+        if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+            continue
+        try:
+            r = pymupdf.Rect(bbox)
+        except Exception:
+            continue
+        if r.is_empty:
+            continue
+        if label in _FIG_LABELS:
+            out["fig"].append(r)
+            if label == "table":
+                out["table"].append(r)
+        elif label == _ABANDON_LABEL:
+            out["abandon"].append(r)
+        elif label == _TITLE_LABEL:
+            out["title"].append({"rect": r, "conf": float(reg.get("conf") or 0.0)})
+    return out
+
+
+def _title_level(raw_text: str, is_doc_title: bool) -> int:
+    """编号深度定级（通用约定）+ 页 0 最大 title → 文档标题级。"""
+    if is_doc_title:
+        return 1
+    m = _TITLE_NUM.match(raw_text or "")
+    if not m:
+        return 2
+    return min(len(m.group(1).split(".")) + 1, 4)
+
+
+def _abandon_hit(para_norm: str, reg_norm: str) -> bool:
+    """段落是否命中 abandon 区域文本。短区域（页码"2"）要求全等——
+    前缀匹配会误杀所有以该字符开头的正文段；长区域用首窗口前缀互含
+    + 段落全包含（VLM 输出把区域拆成多段时的截断片段）三通道。"""
+    if not para_norm or not reg_norm:
+        return False
+    if para_norm == reg_norm:
+        return True
+    if len(reg_norm) < 8:
+        return False
+    if para_norm.startswith(reg_norm[:20]) or reg_norm.startswith(para_norm[:20]):
+        return True
+    # 段落 norm 完整出现在区域文本内（≥12 字符防短串误中）
+    return len(para_norm) >= 12 and para_norm in reg_norm
+
+
+def _drop_abandon_paragraphs(md: str, abandon_norms: list[str]) -> str:
+    """剔除命中 abandon 区域文本的输出段落（T9.2 第三用）。
+
+    遮罩与 truth 扣除之后仍可能有残留（遮罩边缘切半行、VLM 对遮罩边缘
+    的幻觉补全、textlayer 降级路径的页眉页脚），这里按区域文本兜底剔除。
+    纯函数幂等；无区域时原样返回。"""
+    if not md or not abandon_norms:
+        return md
+    parts = re.split(r"(\n\s*\n)", md)
+    out: list[str] = []
+    for para in parts:
+        if re.fullmatch(r"\n\s*\n", para or ""):
+            out.append(para)
+            continue
+        body = (para or "").strip()
+        if not body:
+            out.append(para)
+            continue
+        n = _md_norm(body)
+        if n and any(_abandon_hit(n, a) for a in abandon_norms):
+            out.append("")  # 剔除（保留分隔符占位，join 前收敛空段）
+            continue
+        out.append(body)
+    return re.sub(r"\n{3,}", "\n\n", "".join(out)).strip()
+
+
+def _promote_titles(md: str, layout_titles: list[tuple[str, int]]) -> str:
+    """版面 title 区域 → 输出段落标题提升（T9.2）。
+
+    匹配纪律与 apply_font_evidence 同款：归一化前缀互含 + 段落长度约束
+    （防「以标题词开头的长正文段」误提升）；已是标题的段落跳过（幂等）。"""
+    if not md or not layout_titles:
+        return md
+    parts = re.split(r"(\n\s*\n)", md)
+    out: list[str] = []
+    for para in parts:
+        if re.fullmatch(r"\n\s*\n", para or ""):
+            out.append(para)
+            continue
+        body = (para or "").strip()
+        if not body:
+            out.append(para)
+            continue
+        if not body.startswith("#"):
+            n = _md_norm(body)
+            if n:
+                for tnorm, level in layout_titles:
+                    if not tnorm:
+                        continue
+                    if tnorm.startswith(n[:24]) or (
+                        n.startswith(tnorm[:24]) and len(n) <= len(tnorm) + 20
+                    ):
+                        body = "#" * level + " " + body
+                        break
+        out.append(body)
+    return "".join(out)
+
 # 原始解析结果的缓存伪模型名（cache/file_cache.ocr_key 的 model 位）。
 # 独立于 textlayer / 视觉 OCR 缓存；仅当解析协议（提示/重试策略）变化
 # 时才 bump 版本后缀。
-VLM_PARSE_MODEL = "vlm-parse-v1"
+# v2（阶段12-T9.2）：送 VLM 前遮罩扩展到 abandon 区域（版权/页眉不再
+# 进入解析视野），旧缓存是未遮罩产物，需整体失效重解析。
+VLM_PARSE_MODEL = "vlm-parse-v2"
 
 # 并发上限：与扫描页视觉通道共用免费档保守值
 CONCURRENCY = siliconflow.OCR_CONCURRENCY
@@ -223,17 +353,21 @@ async def parse_page(
 # ── 快照/遮罩/truth 协同（阶段12-T2）─────────────────────────────────
 
 
-def _prepare(file_path: str, pno: int, image_dir: str | None) -> dict:
+def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=None) -> dict:
     """页级准备（阻塞，调用方放线程）：快照 + truth + 几何信息。
 
     - 快照复用 textlayer._snapshot_figures（含 sidecar、v5 表格=快照
       决策）——VLM 路线的遮罩、truth 扣除与文本层降级路径必须同区域
       才自洽；
+    - 版面模型区域（T9.2）：table/figure 并入快照候选（无框表补位，
+      DALK p9 回归用例）；abandon 区域三用数据在此采集（区域矩形 +
+      区域文本 norm——遮罩渲染时由调用方拼接 regions+abandon）；
+      title 区域文本提取 + 编号深度定级（页 0 最大 title → #）；
     - 快照必须先于遮罩渲染：_figure_regions 依赖 cluster_drawings，
       先画白底矩形会把遮罩本身当成绘图簇；
-    - truth = 文本层字符流扣除快照区域内部文本（图注豁免，与 redact
-      同判定）——交叉校验（T3）的比对基准，快照承载的内容不要求 VLM
-      复述；
+    - truth = 文本层字符流扣除快照区域与 abandon 区域内部文本（图注
+      豁免，与 redact 同判定）——交叉校验（T3）的比对基准，快照承载
+      与佐料区域的内容都不要求 VLM 复述；
     - scanned 分类与 extract_pages 有效性判定同口径：短文本 + 无快照
       = 扫描页，维持既有视觉通道。
     """
@@ -243,18 +377,53 @@ def _prepare(file_path: str, pno: int, image_dir: str | None) -> dict:
             # 目录必须存在：pix.save 对不存在的目录抛错（extract_pages
             # 同款兜底，曾把快照管线静默打空的实测踩坑）
             os.makedirs(image_dir, exist_ok=True)
+        lr = _split_layout_regions(layout_regions)
         refs, snap_regions = (
-            _snapshot_figures(doc, pno, image_dir) if image_dir else ([], [])
+            _snapshot_figures(
+                doc,
+                pno,
+                image_dir,
+                extra_regions=lr["fig"],
+                table_regions=lr["table"],
+            )
+            if image_dir
+            else ([], [])
         )
         page = doc[pno]
         inner = _figure_inner_text_rects(page, snap_regions) if snap_regions else []
+        # abandon 区域文本（输出剔除的匹配基准）
+        abandon_norms = []
+        for r in lr["abandon"]:
+            a = _md_norm(page.get_text("text", clip=r))
+            if a:
+                abandon_norms.append(a)
+        # title 区域 → (norm, level)；页 0 最大 title 判文档标题级
+        layout_titles: list[tuple[str, int]] = []
+        if lr["title"]:
+            largest = (
+                max(lr["title"], key=lambda t: t["rect"].get_area())
+                if pno == 0
+                else None
+            )
+            for t in lr["title"]:
+                raw = page.get_text("text", clip=t["rect"])
+                tn = _md_norm(raw)
+                if not tn:
+                    continue
+                layout_titles.append((tn, _title_level(raw, t is largest)))
         parts = []
         for b in page.get_text("blocks"):
             r = pymupdf.Rect(b[:4])
             # inner 里的矩形就是被剔除块自身的 bbox（_figure_inner_text_rects
-            # 按块主体 60% 落在区域内筛选），重叠 ≥60% 即同一块
+            # 按块主体 60% 落在区域内筛选），重叠 ≥60% 即同一块；abandon
+            # 区域同口径扣除（佐料文本不进 truth，VLM 不复述不算丢内容）
             if any(
                 (r & ir).get_area() >= 0.6 * max(r.get_area(), 1.0) for ir in inner
+            ):
+                continue
+            if any(
+                (r & ar).get_area() >= 0.6 * max(r.get_area(), 1.0)
+                for ar in lr["abandon"]
             ):
                 continue
             parts.append(b[4] if len(b) > 4 else "")
@@ -264,6 +433,9 @@ def _prepare(file_path: str, pno: int, image_dir: str | None) -> dict:
             "scanned": raw_text_len < MIN_TEXT_CHARS and not refs,
             "refs": refs,
             "regions": snap_regions,
+            "abandon_rects": lr["abandon"],
+            "abandon_norms": abandon_norms,
+            "layout_titles": layout_titles,
             "raw_blocks": page.get_text("blocks"),
             "truth": truth,
         }
@@ -272,7 +444,7 @@ def _prepare(file_path: str, pno: int, image_dir: str | None) -> dict:
 
 
 def _finalize_md(prep: dict, md: str) -> str:
-    """快照引用插回 + 双栏顺序几何兜底（阶段12-T5）。
+    """快照引用插回 + 双栏顺序几何兜底 + 版面区域消费（T9.2）。
 
     - 插回：几何配对用 PDF raw_blocks 的 caption 真实坐标（与 textlayer
       同款 _insert_figures），在 VLM 输出里按 caption 文本定位插入点——
@@ -280,12 +452,18 @@ def _finalize_md(prep: dict, md: str) -> str:
     - 顺序兜底：VLM 偶发整栏交换（A/B 实测 DALK p2 反例：内容完整 bag
       0.99、双栏整栏互换）。_column_reading_order 自带高置信门槛（全部
       段落可定位坐标 + 左右各 ≥3 窄块 + 干净分栏沟），不满足即原样返回
-      ——兜底只会纠正、不会搅乱。"""
+      ——兜底只会纠正、不会搅乱；
+    - abandon 段落剔除：遮罩/truth 扣除后的残留兜底（区域文本匹配）；
+    - title 提升编号定级：无版面信号时该步为空（字号证据兜底见 T9.4）。"""
     if prep["refs"]:
         md = _insert_figures(
             md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
         )
-    return _column_reading_order(prep["raw_blocks"], md)
+    md = _column_reading_order(prep["raw_blocks"], md)
+    md = _drop_abandon_paragraphs(md, prep.get("abandon_norms") or [])
+    if prep.get("layout_titles"):
+        md = _promote_titles(md, prep["layout_titles"])
+    return md
 
 
 def _textlayer_fallback(file_path: str, pno: int, image_dir: str | None, prep: dict) -> str:
@@ -309,8 +487,14 @@ async def parse_page_verified(
     cache_dir: str,
     bag_threshold: float = 0.90,
     sem: asyncio.Semaphore | None = None,
+    layout=None,
 ) -> dict:
-    """数字页混合主路线（T1+T2+T3）：快照 → 遮罩解析 → 插回 → 交叉校验降级。
+    """数字页混合主路线（T1+T2+T3+T9.2）：快照 → 遮罩解析 → 插回 → 交叉校验降级。
+
+    layout：ocr.layout_model.LayoutProvider（T9.2 版面模型信号源）。
+    None（回归工具/单页直调）或该页无产出（运行时缺失/失败/缓存空）时，
+    等价于无版面信号的既有行为——快照不含无框表补位、无遮罩扩展、
+    无标题提升，管线照常完成。
 
     返回：
       {"scanned": True}                          扫描页，调用方走视觉通道
@@ -328,7 +512,10 @@ async def parse_page_verified(
     sem：VLM 调用阶段的并发闸（免费档 RPM 保守值）。必须由调用方在其
     事件循环内创建后传入（asyncio 原语跨 loop 复用会报错）；None = 不限。
     """
-    prep = await asyncio.to_thread(_prepare, file_path, pno, image_dir)
+    layout_regions = (
+        await layout.regions(pno) if layout is not None else None
+    )
+    prep = await asyncio.to_thread(_prepare, file_path, pno, image_dir, layout_regions)
     if prep["scanned"]:
         return {"scanned": True}
 
@@ -341,7 +528,10 @@ async def parse_page_verified(
             # nullcontext 支持 async（3.10+）：sem 缺省时不限并发
             async with (sem if sem is not None else nullcontext()):
                 res = await parse_page(
-                    file_path, pno, config, mask_regions=prep["regions"]
+                    file_path,
+                    pno,
+                    config,
+                    mask_regions=prep["regions"] + prep["abandon_rects"],
                 )
             md_raw, trunc = res["md"], res["trunc"]
             fresh = True
@@ -382,6 +572,9 @@ async def parse_page_verified(
             "fallback_reason": "fallback_error",
         }
     reason = "empty" if not md_raw else ("no_truth" if not truth_n else "bag")
+    # textlayer 降级输出同样消费 abandon 区域（其文本噪音规则追不上
+    # 出版商套话形态，模型按区域判定与措辞无关）
+    md = _drop_abandon_paragraphs(md, prep.get("abandon_norms") or [])
     return {
         "md": md,
         "source": "textlayer",

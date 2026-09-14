@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
 from ocr import vlm_parse
+from ocr.layout_model import LayoutProvider
 from ocr.siliconflow import call_ocr, split_into_blocks
 from ocr.textlayer import (
     extract_pages,
@@ -66,7 +67,11 @@ MAX_CONCURRENCY = 8
 # 「快照+遮罩 → PaddleOCR-VL 整页结构化解析 → 交叉校验降级」（公式定界
 # LaTeX/复杂版式完整度提升，见 docs/VLM结构化解析对比.md），textlayer
 # 变为降级路径；翻译缓存按 text_hash 键控，未变化文本免重译
-TEXT_LAYER_MODEL = "text-layer-v19"
+# v19→v20（2026-09-14 阶段12-T9.2 版面模型信号源）：DocLayout-YOLO 区域
+# 接入——abandon 遮罩+truth 扣除+输出剔除（版权/venue 段不再混入）、
+# title 提升编号定级（标题层级恢复）、table/figure 并入快照候选（无框表
+# 不再碎行混正文）；提取产物结构性变化，旧文本层缓存整体失效重建
+TEXT_LAYER_MODEL = "text-layer-v20"
 
 # 视觉 OCR 缓存版本后缀。v2：OCR 结果顶部插入整页快照（扫描页图片/表格可见），
 # 旧缓存无快照需失效——会使扫描页重跑一次视觉 OCR（产生一次 API 调用）。
@@ -502,6 +507,7 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
     bag_threshold = float(vlm_cfg.get("bag_threshold", 0.90))
     sem = asyncio.Semaphore(vlm_parse.CONCURRENCY)
     pending: dict[int, asyncio.Task] = {}
+    vlm_todo: list[int] = []
 
     for i in range(total_pages):
         # 最终产物缓存命中 → 直接挂载（VLM/降级来源随缓存记录，供 stats）
@@ -515,19 +521,7 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
             else:
                 job["stats"]["vlm_pages"] += 1
         elif vlm_enabled:
-            # 全部页任务先行创建，第二循环按页序 await（并发由 sem 闸住）
-            pending[i] = asyncio.create_task(
-                vlm_parse.parse_page_verified(
-                    file_path,
-                    i,
-                    pdf_hash,
-                    image_dir,
-                    config,
-                    cache_dir,
-                    bag_threshold=bag_threshold,
-                    sem=sem,
-                )
-            )
+            vlm_todo.append(i)  # 先收集，provider 就绪后再建任务（见下）
         else:
             md = (await asyncio.to_thread(extract_pages, file_path, [i], image_dir))[0]
             if md:  # 有文本层
@@ -549,6 +543,46 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
                     job["stats"]["ocr_cache_hit"] += 1
                 else:
                     vision_pages.append(i)
+
+    # 版面模型信号源（阶段12-T9.2）：VLM 页统一取一次 DocLayout-YOLO 区域
+    # （子进程跑随包 babeldoc 运行时，缓存优先）。必须在建页任务**之前**
+    # start——regions() 依赖 start 创建的页级 future，早于 start 调用会
+    # 恒 None（竞态防复发）。任何失败都只是退回无版面信号行为。
+    layout = None
+    job["stats"].setdefault("layout_pages", 0)
+    if vlm_todo:
+        layout = LayoutProvider(
+            file_path,
+            pdf_hash,
+            cache_dir,
+            data_dir=os.path.dirname(os.path.abspath(cache_dir)),
+        )
+        try:
+            await layout.start(vlm_todo)
+        except Exception as e:  # noqa: BLE001 —— 版面信号是增强，不是依赖
+            print(f"[layout] 版面模型启动失败（降级为无版面信号）: {e}")
+            layout = None
+        if layout is not None:
+            print(
+                f"[layout] 版面模型 status={layout.status} "
+                f"cached={layout.stats['cached']} model={layout.stats['model']}"
+                + (f" reason={layout.fail_reason}" if layout.fail_reason else "")
+            )
+    for i in vlm_todo:
+        # 全部页任务先行创建，第二循环按页序 await（并发由 sem 闸住）
+        pending[i] = asyncio.create_task(
+            vlm_parse.parse_page_verified(
+                file_path,
+                i,
+                pdf_hash,
+                image_dir,
+                config,
+                cache_dir,
+                bag_threshold=bag_threshold,
+                sem=sem,
+                layout=layout,
+            )
+        )
 
     # 按页序等待 VLM 任务：首页就绪即挂载（页级流式），失败传播前先取消
     # 其余任务（防孤儿任务与「exception never retrieved」噪音）
@@ -590,6 +624,8 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
     except Exception:
         for t in pending.values():
             t.cancel()
+        if layout is not None:
+            await layout.close()
         raise
 
     # 扫描页走视觉 OCR（只调缺的页），结果原地替换占位。
@@ -606,6 +642,12 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
                 ocr_key(pdf_hash, p["page"], vision_model + VISION_CACHE_SUFFIX),
                 {"blocks": p["blocks"]},
             )
+
+    # 版面信号源收尾：统计进 job stats（前端进度页/日志可见降级状态）
+    if layout is not None:
+        job["stats"]["layout_pages"] = layout.stats["used"]
+        job["stats"]["layout_status"] = layout.status
+        await layout.close()
 
     result = [p for p in pages if p is not None]
     if not result:

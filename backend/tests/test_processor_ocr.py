@@ -28,6 +28,23 @@ def _one_page_pdf(tmp_path) -> str:
 _CFG = {"api_key": "k", "api_url": "https://x/v1", "model": "vision-m"}
 
 
+class _NoLayout:
+    """版面信号桩：unavailable（regions 恒 None），防测试真起 babeldoc 子进程。"""
+
+    status = "unavailable"
+    fail_reason = ""
+    stats = {"cached": 0, "model": 0, "used": 0}
+
+    async def start(self, pages):
+        return None
+
+    async def regions(self, page):
+        return None
+
+    async def close(self):
+        return None
+
+
 def _job() -> dict:
     return {"pages": [], "progress": 0, "stats": {"ocr_cache_hit": 0, "ocr_total": 0}}
 
@@ -41,11 +58,13 @@ def test_vlm_route_mounts_and_records(tmp_path, monkeypatch):
         return {"md": "# Title\n\nBody.", "source": "vlm", "bag": 0.99, "trunc": 0}
 
     monkeypatch.setattr(processor.vlm_parse, "parse_page_verified", fake_verified)
+    monkeypatch.setattr(processor, "LayoutProvider", lambda *a, **kw: _NoLayout())
     job = _job()
     pages = asyncio.run(processor._load_or_run_ocr(pdf, "h1", _CFG, job))
     assert pages[0]["blocks"][0]["original"] == "# Title\n\nBody."
     assert job["stats"]["vlm_pages"] == 1
     assert job["stats"]["vlm_fallback"] == 0
+    assert job["stats"]["layout_pages"] == 0  # 版面桩不可用：无区域消费
     # 最终产物缓存记录 source（重跑时 stats 可还原来源）
     cached = read_cache(cache_dir, ocr_key("h1", 0, processor.TEXT_LAYER_MODEL))
     assert cached["source"] == "vlm"
@@ -123,6 +142,7 @@ def test_scanned_page_routes_to_vision(tmp_path, monkeypatch):
         return {"scanned": True}
 
     monkeypatch.setattr(processor.vlm_parse, "parse_page_verified", fake_verified)
+    monkeypatch.setattr(processor, "LayoutProvider", lambda *a, **kw: _NoLayout())
 
     async def fake_call_ocr(file_path, config, only_pages=None, page_image_dir=None):
         assert only_pages == [0]
