@@ -745,6 +745,27 @@ def count_pages(file_path: str) -> int:
         doc.close()
 
 
+def _strip_broken_links(page) -> None:
+    """get_links 崩溃时清空页 /Annots（2026-09-14 阶段12 实测）。
+
+    症状：apply_redactions 删除重叠注解后可能留下悬空链接项，随后
+    pymupdf4llm 遍历 page.get_links() 提超链接时迭代器越界
+    （IndexError），整页提取直接崩（Attention p10 / Survey p5 实测，
+    均发生在 redact 副本分支；原本注解就损坏的 PDF 同理）。
+    处理：get_links 正常的页不动（保留超链接提取）；崩溃的页清空
+    /Annots——只丢该提取副本上的超链接/批注，正文不受影响。
+    redact 分支必须在 apply_redactions 之后调用（崩溃源即其副作用）。"""
+    try:
+        page.get_links()
+        return
+    except Exception:
+        pass
+    try:
+        page.parent.xref_set_key(page.xref, "Annots", "[]")
+    except Exception:
+        pass  # 仍失败则交给上层异常处理
+
+
 def extract_page_md(
     doc,
     file_path: str,
@@ -761,6 +782,9 @@ def extract_page_md(
     才自洽。返回 markdown（可能为空，页有效性判定归调用方）。"""
     # 1) 提取文本：有图表区域的页在 redact 副本上提取
     page = doc[pno]
+    # 链接注解损坏的页先剥离（否则 pymupdf4llm 的 get_links 崩，见
+    # _strip_broken_links；正文不受影响，只丢超链接）
+    _strip_broken_links(page)
     regions = snap_regions if refs else []
     inner = _figure_inner_text_rects(page, regions) if regions else []
     raw_blocks: list = []
@@ -773,6 +797,9 @@ def extract_page_md(
                 page2.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
             except TypeError:
                 page2.apply_redactions()
+            # redaction 副作用可能留下悬空链接项（见 _strip_broken_links），
+            # 必须在 apply_redactions 之后、to_markdown 之前剥
+            _strip_broken_links(page2)
             chunks = pymupdf4llm.to_markdown(doc2, page_chunks=True, pages=[pno])
             # 阅读顺序重排的坐标基准必须与提取源一致（redact 后的
             # 副本），且必须在 doc2 存活期内取块（close 后 page 失效）
