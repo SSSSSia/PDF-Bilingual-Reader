@@ -144,12 +144,17 @@ def _cfg_dir() -> str:
     return os.path.dirname(os.path.expandvars(r"%APPDATA%\pdf-reader\config.json"))
 
 
-async def vlm_parse_page(path: str, pno: int, cfg: dict, cache_dir: str, image_dir: str, sem) -> dict:
-    """整页解析（生产链路：快照+遮罩→VLM→校验降级→插回/顺序兜底）。
-    原始解析命中 vlm-parse-v1 页级缓存——回归重放零 API 成本。"""
+async def vlm_parse_page(
+    path: str, pno: int, cfg: dict, cache_dir: str, image_dir: str, sem, layout=None
+) -> dict:
+    """整页解析（生产链路：版面区域→快照+遮罩→VLM→校验降级→插回/结构消费）。
+    原始解析命中 vlm-parse-v2 页级缓存——回归重放零 API 成本；layout
+    （T9.5 起接入）缺省 None = 无版面信号行为，真跑生产口径请传入
+    LayoutProvider。注意：真值仍是全页字符流（raw 口径）——T9 后版权/
+    venue 段被有意剔除，这些页的 bag 会小幅回落，属预期而非回归。"""
     t0 = time.perf_counter()
     out = await vlm_parse.parse_page_verified(
-        path, pno, file_hash(path), image_dir, cfg, cache_dir, sem=sem
+        path, pno, file_hash(path), image_dir, cfg, cache_dir, sem=sem, layout=layout
     )
     return {
         "text": out.get("md") or "",
@@ -210,9 +215,9 @@ async def main() -> None:
     sem = asyncio.Semaphore(3)
     image_dir = tempfile.mkdtemp(prefix="ab_vlm_")
 
-    async def guarded_parse(path, pno):
+    async def guarded_parse(path, pno, layout=None):
         async with sem:
-            return await vlm_parse_page(path, pno, ocr_cfg, cache_dir, image_dir, sem=None)
+            return await vlm_parse_page(path, pno, ocr_cfg, cache_dir, image_dir, sem=None, layout=layout)
 
     for path, pages in papers:
         if not os.path.isfile(path):
@@ -225,7 +230,24 @@ async def main() -> None:
         tl_mds = extract_pages(path, pages, image_dir)  # 现行生产管线（降级路径）
         tl_elapsed = time.perf_counter() - t0
 
-        vlms = await asyncio.gather(*(guarded_parse(path, p) for p in pages))
+        # T9.5：Route B 与生产同源——版面模型区域先行（子进程+按页缓存），
+        # 失败自动降级为无版面信号（生产同款兜底语义）
+        from ocr.layout_model import LayoutProvider
+
+        layout = LayoutProvider(path, file_hash(path), cache_dir, data_dir=_cfg_dir())
+        try:
+            await layout.start(pages)
+        except Exception as e:  # noqa: BLE001
+            print(f"[layout] {name}: 版面信号降级（{e}）", flush=True)
+            layout = None
+        if layout is not None:
+            print(f"[layout] {name}: status={layout.status} "
+                  f"cached={layout.stats['cached']} model={layout.stats['model']}", flush=True)
+
+        vlms = await asyncio.gather(*(guarded_parse(path, p, layout) for p in pages))
+
+        if layout is not None:
+            await layout.close()
 
         doc = pymupdf.open(path)
         for i, pno in enumerate(pages):

@@ -87,8 +87,8 @@ def test_drop_abandon_idempotent_and_empty():
 def test_promote_titles_levels_and_idempotent():
     md = "1 Introduction\n\nSome body paragraph that is long enough to look like prose.\n\n3.4 Ablation Study"
     titles = [
-        (_md_norm("1 Introduction"), 2),
-        (_md_norm("3.4 Ablation Study"), 3),
+        (_md_norm("1 Introduction"), "1 Introduction", 2),
+        (_md_norm("3.4 Ablation Study"), "3.4 Ablation Study", 3),
     ]
     out = vlm_parse._promote_titles(md, titles)
     assert "## 1 Introduction" in out
@@ -98,13 +98,42 @@ def test_promote_titles_levels_and_idempotent():
     assert vlm_parse._promote_titles(out, titles) == out
 
 
-def test_promote_titles_length_guard_blocks_body_paragraph():
-    # 正文段以标题词开头但远长于标题：不提升（apply_font_evidence 同款纪律）
-    tnorm = _md_norm("1 Introduction")
-    md = "1 Introduction is the section where authors usually describe the motivation " \
-         "and contributions of the paper in great detail for readers."
-    out = vlm_parse._promote_titles(md, [(tnorm, 2)])
-    assert out == md
+def test_promote_titles_runin_split():
+    """run-in 拆分（FG-RAG p1 实测形态）：VLM 把标题行与正文粘成一段，
+    段落前缀与标题区域文本逐字符对齐 → 拆成标题段 + 余文段。"""
+    titles = [
+        (_md_norm("Abstract"), "Abstract", 2),
+        (_md_norm("1 Introduction"), "1 Introduction", 2),
+    ]
+    md = (
+        "Abstract Retrieval-Augmented Generation (RAG) enables large language "
+        "models to provide more precise answers.\n\n"
+        "1 Introduction Retrieval-Augmented Generation (RAG) systems enhance "
+        "the capabilities of large language models."
+    )
+    out = vlm_parse._promote_titles(md, titles)
+    assert "## Abstract\n\nRetrieval-Augmented Generation (RAG) enables" in out
+    assert "## 1 Introduction\n\nRetrieval-Augmented Generation (RAG) systems" in out
+    # 幂等
+    assert vlm_parse._promote_titles(out, titles) == out
+
+
+def test_promote_titles_mismatched_prefix_not_split():
+    """前缀对不上（措辞漂移/正文只是恰好以相近词开头）→ 不拆不提升。"""
+    titles = [(_md_norm("1 Introduction"), "1 Introduction", 2)]
+    md = (
+        "Introduction of the topic begins here with ordinary prose that merely "
+        "starts with a similar word but never aligned with the region text."
+    )
+    assert vlm_parse._promote_titles(md, titles) == md
+
+
+def test_norm_split_aligns_punctuation_and_case():
+    body = "3.4  ABLATION Study: details are given next."
+    head, rest = vlm_parse._norm_split(body, "34ablationstudy")
+    assert head == "3.4  ABLATION Study"
+    assert rest == ": details are given next."
+    assert vlm_parse._norm_split(body, "34ablationstudyx") is None  # 对不上
 
 
 # ── _prepare / _finalize_md 集成（合成 PDF + 手工区域）───────────
@@ -152,7 +181,7 @@ def test_prepare_consumes_layout_regions(tmp_path):
     assert "1 Introduction to the Synthetic Corpus" in prep["truth"]
     # abandon 区域文本与标题候选已采集
     assert any("permissiontomakedigital" in a for a in prep["abandon_norms"])
-    assert prep["layout_titles"] and prep["layout_titles"][0][1] == 1  # 页 0 最大 title → #
+    assert prep["layout_titles"] and prep["layout_titles"][0][2] == 1  # 页 0 最大 title → #
     # 无框表进了快照管线：refs 一张、命名 tab_*（table_regions 分类）
     assert len(prep["refs"]) == 1
     assert "tab_" in prep["refs"][0]

@@ -144,11 +144,36 @@ def _drop_abandon_paragraphs(md: str, abandon_norms: list[str]) -> str:
     return re.sub(r"\n{3,}", "\n\n", "".join(out)).strip()
 
 
-def _promote_titles(md: str, layout_titles: list[tuple[str, int]]) -> str:
-    """版面 title 区域 → 输出段落标题提升（T9.2）。
+def _norm_split(body: str, tnorm: str) -> tuple[str, str] | None:
+    """按归一化前缀把 body 切成 (标题原文, 余文)；对不上返回 None。
 
-    匹配纪律与 apply_font_evidence 同款：归一化前缀互含 + 段落长度约束
-    （防「以标题词开头的长正文段」误提升）；已是标题的段落跳过（幂等）。"""
+    逐字符对齐（_md_norm 逐字符 0/1 输出）：VLM 的空白/标点差异不影响
+    对齐，字母数字逐位必须相等（措辞漂移即放弃，宁可不拆不拆错）。"""
+    ti = 0
+    for i in range(len(body) + 1):
+        if ti >= len(tnorm):
+            return body[:i].rstrip(), body[i:].lstrip()
+        if i >= len(body):
+            return None
+        c = _md_norm(body[i])
+        if not c:
+            continue
+        if tnorm[ti] != c:
+            return None
+        ti += 1
+    return None
+
+
+def _promote_titles(md: str, layout_titles: list) -> str:
+    """版面 title 区域 → 输出段落标题提升（T9.2）+ run-in 拆分（T9.5）。
+
+    layout_titles 元素为 (norm, raw, level)。匹配纪律：
+    - 整段即标题（前缀互含 + 长度约束，apply_font_evidence 同款）→ 加 # 前缀；
+    - **run-in 拆分**：VLM 常把标题行与后续正文粘成一段（FG-RAG p1 实测
+      "Abstract Retrieval-Augmented..."）——段落归一化前缀与标题区域文本
+      逐字符对齐（tnorm ≥6 字符）时，拆成「标题段 + 余文段」，几何证据
+      保驾护航（模型在页面上真的看到了这行标题），非文本猜测；
+    - 已是标题的段落跳过（幂等）；对齐失败原样返回。"""
     if not md or not layout_titles:
         return md
     parts = re.split(r"(\n\s*\n)", md)
@@ -164,7 +189,7 @@ def _promote_titles(md: str, layout_titles: list[tuple[str, int]]) -> str:
         if not body.startswith("#"):
             n = _md_norm(body)
             if n:
-                for tnorm, level in layout_titles:
+                for tnorm, traw, level in layout_titles:
                     if not tnorm:
                         continue
                     if tnorm.startswith(n[:24]) or (
@@ -172,7 +197,20 @@ def _promote_titles(md: str, layout_titles: list[tuple[str, int]]) -> str:
                     ):
                         body = "#" * level + " " + body
                         break
-        out.append(body)
+                    if (
+                        len(n) > len(tnorm) + 20
+                        and len(tnorm) >= 6
+                        and n.startswith(tnorm[:24])
+                    ):
+                        split = _norm_split(body, tnorm)
+                        if split and split[1]:
+                            head, rest = split
+                            out.extend(
+                                ["#" * level + " " + head, "\n\n", rest]
+                            )
+                            body = None
+                            break
+        out.append(body if body is not None else "")
     return "".join(out)
 
 # 原始解析结果的缓存伪模型名（cache/file_cache.ocr_key 的 model 位）。
@@ -399,8 +437,9 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
             a = _md_norm(page.get_text("text", clip=r))
             if a:
                 abandon_norms.append(a)
-        # title 区域 → (norm, level)；页 0 最大 title 判文档标题级
-        layout_titles: list[tuple[str, int]] = []
+        # title 区域 → (norm, raw, level)；页 0 最大 title 判文档标题级。
+        # raw 保留区域原文（run-in 拆分需要真实字符做切分点）
+        layout_titles: list[tuple[str, str, int]] = []
         if lr["title"]:
             largest = (
                 max(lr["title"], key=lambda t: t["rect"].get_area())
@@ -408,11 +447,11 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
                 else None
             )
             for t in lr["title"]:
-                raw = page.get_text("text", clip=t["rect"])
+                raw = page.get_text("text", clip=t["rect"]).strip()
                 tn = _md_norm(raw)
                 if not tn:
                     continue
-                layout_titles.append((tn, _title_level(raw, t is largest)))
+                layout_titles.append((tn, raw, _title_level(raw, t is largest)))
         parts = []
         for b in page.get_text("blocks"):
             r = pymupdf.Rect(b[:4])

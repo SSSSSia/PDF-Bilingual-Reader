@@ -218,11 +218,25 @@ from ocr.layout_model import dedupe_regions  # noqa: E402
 
 def test_dedupe_conf_floor_boundary():
     regions = [
-        {"label": "table", "conf": 0.599, "bbox": [10, 10, 200, 100]},
-        {"label": "table", "conf": 0.60, "bbox": [20, 20, 210, 110]},
+        {"label": "table", "conf": 0.499, "bbox": [10, 10, 200, 100]},
+        {"label": "table", "conf": 0.50, "bbox": [20, 20, 210, 110]},
     ]
     out = dedupe_regions(regions)
-    assert len(out) == 1 and out[0]["conf"] == 0.60  # 下限含边界；0.599 滤除
+    assert len(out) == 1 and out[0]["conf"] == 0.50  # 下限含边界；0.499 滤除
+
+
+def test_dedupe_fg_rag_p3_measured_case():
+    """实测回归（2026-09-14 worker 冒烟）：第三张无框表 0.56 与复检框
+    0.38 同 bbox——0.56 保留（验收标准 1），0.38 双重死亡（下限+IoU）。"""
+    regions = [
+        {"label": "table", "conf": 0.92, "bbox": [318, 317, 557, 375]},
+        {"label": "table", "conf": 0.76, "bbox": [318, 238, 557, 295]},
+        {"label": "table", "conf": 0.56, "bbox": [318, 83, 558, 216]},
+        {"label": "table", "conf": 0.38, "bbox": [318, 83, 557, 216]},  # 复检框
+        {"label": "table", "conf": 0.30, "bbox": [60, 500, 300, 560]},  # Algorithm 框
+    ]
+    out = dedupe_regions(regions)
+    assert [r["conf"] for r in out] == [0.56, 0.76, 0.92]
 
 
 def test_dedupe_same_label_iou_keeps_highest_conf():
