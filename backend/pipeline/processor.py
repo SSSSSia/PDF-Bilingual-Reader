@@ -11,7 +11,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import settings
 from ocr import vlm_parse
 from ocr.siliconflow import call_ocr, split_into_blocks
-from ocr.textlayer import extract_pages, count_pages, MIN_TEXT_CHARS
+from ocr.textlayer import (
+    extract_pages,
+    count_pages,
+    MIN_TEXT_CHARS,
+    _GENERIC_HEADINGS,
+)
 from translate.base import translate_batch, translate_text
 from translate.providers.openai_compat import PROMPT_VERSION
 from translate import sanitize
@@ -350,15 +355,9 @@ async def _translate_figure_block(original_md: str, file_path: str, t_cfg: dict)
 
 # 通用章节名（不区分大小写）：标题提取时跳过，防止「Abstract」这类
 # 被 pymupdf4llm 误判成顶级标题的章节头混进文档标题（2026-09-09 用户反馈）
-_GENERIC_HEADINGS = {
-    "abstract", "summary", "keywords", "introduction", "related work",
-    "background", "motivation", "preliminaries", "methods", "methodology",
-    "method", "approach", "experiments", "experimental setup", "results",
-    "evaluation", "discussion", "conclusion", "conclusions", "future work",
-    "references", "acknowledgments", "acknowledgements", "appendix",
-    "contributions", "overview", "contents", "摘要", "关键词", "引言",
-    "背景", "方法", "实验", "结果", "讨论", "结论", "参考文献", "附录", "目录",
-}
+# 通用节名词汇（标题几何证据/作者抑制共用）已移至提取层 ocr/textlayer.py
+# （阶段12 验收期修复），此处导入使用；_is_generic_heading 保留多级编号
+# 章节头直接判非标题的文档标题语义。
 
 
 def _extract_doc_title(pages: list, file_path: str | None = None) -> str:

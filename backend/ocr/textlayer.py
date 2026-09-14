@@ -722,6 +722,282 @@ def _find_para_pos(md: str, cnorm: str) -> int | None:
     return None
 
 
+# ── 字号几何证据（阶段12 验收期修复，2026-09-14）─────────────────────
+# VLM「OCR:」输出是平文本：无 # 标题层级、首页小字版权块与正文同权
+# （FG-RAG 重翻验收实测：全篇零标题、ACM 权限声明混在作者信息里）。
+# 修法沿用 title_detect 哲学——回读 PDF 一手字号证据，类级通用。
+#
+# 判定规则（4 版式语料标定：ACL 双栏/ACM 会议/NeurIPS/ACM 期刊）：
+# - 标题行 = 整行粗体（≥80% 字符在粗体 span）且字号 ≥ 正文字号且
+#   含 ≥2 个字母（剔纯数字表行）且非图表注（_FIG_CAPTION）。
+#   粗体是关键区分器：FG-RAG 作者名比节标题更大但不粗、Attention 的
+#   arXiv 侧章与 Abstract 同号但不粗——均被排除；
+# - 正文字号基准取**第 0 页众数**（出版模板全文恒定；逐页取会被
+#   参考文献页整页小字带偏，FG-RAG p5 实测 body 塌到 7pt）；
+# - 字号量化到 0.5pt 网格再比较（PDF span 有 ±0.2 渲染抖动，8.9/9.0/
+#   9.1 是同一名义字号，不量化会把众数和比例全搅乱）；
+# - 层级：节编号深度定级（"4"→##、"3.4"/"3.2.1"→###，学界通用约定）；
+#   无编号时页 0 最大粗体行（≥1.15×）= # 文档标题；非首页的本页最大
+#   粗体档 = ##（该页主标题档）；其余按字号档（≥1.45×→#，≥1.15×→##，
+#   否则 ###）；
+# - 页 0 抑制：只认文档标题/通用节名词汇（Abstract 等，跨论文稳定
+#   词汇非单篇特调）/编号节标题——作者行（粗体短行的整簇）被整类剔除；
+# - 首页小字印刷（≤0.85×正文且成块 ≥60 字符）= 出版商版权/权限声明
+#   （ACM/IEEE/Springer 惯例首页脚注字号；NeurIPS/arXiv 无此块则
+#   零候选零误伤）。
+_HEAD_TITLE_RATIO = 1.15   # 页 0 文档标题的最小粗体字号比
+_HEAD_L1_RATIO = 1.45     # 无编号时 # 档
+_HEAD_L2_RATIO = 1.15     # 无编号时 ## 档
+_SMALLPRINT_RATIO = 0.85  # 首页小字印刷判定
+_SMALLPRINT_MIN_CHARS = 60
+_SIZE_QUANT = 2.0         # 量化到 0.5pt 网格（round(size*2)/2）
+_BOLD_LINE_RATIO = 0.8    # 整行粗体的字符占比阈值
+_HEAD_MAX_LEN = 110       # 标题行长度上限（粗体问题条目/段首引导不提升）
+_NUM_DEPTH = re.compile(r"^(\d+(?:\.\d+)*)\s")
+
+# 通用节名词汇（跨论文稳定的结构性标签，从 processor 移入提取层）：
+# 页 0 作者抑制的白名单 + 文档标题提取的排除表共用
+_GENERIC_HEADINGS = {
+    "abstract", "summary", "keywords", "introduction", "related work",
+    "background", "motivation", "preliminaries", "preliminary", "methods",
+    "methodology", "method", "approach", "experiments", "experimental setup",
+    "results", "evaluation", "discussion", "conclusion", "conclusions",
+    "future work", "references", "acknowledgments", "acknowledgements",
+    "appendix", "contributions", "overview", "contents", "摘要", "关键词",
+    "引言", "背景", "方法", "实验", "结果", "讨论", "结论", "参考文献",
+    "附录", "目录",
+}
+
+
+def _is_generic_heading_text(text: str) -> bool:
+    """去编号/强调符后是否通用节名。"""
+    t = re.sub(r"^\d+(\.\d+)*\s+", "", text.replace("*", "").strip())
+    return t.rstrip(":：").strip().lower() in _GENERIC_HEADINGS
+
+
+def _quant(size: float) -> float:
+    return round(size * _SIZE_QUANT) / _SIZE_QUANT
+
+
+def _line_bold_ratio(spans: list) -> float:
+    """行的粗体字符占比（整行粗体才算标题候选，run-in 引导词只有局部粗体）。"""
+    total = bold = 0
+    for s in spans:
+        n = len(s.get("text", "").strip())
+        if n <= 0:
+            continue
+        total += n
+        if (s.get("flags", 0) & 16) or "bold" in (s.get("font") or "").lower():
+            bold += n
+    return bold / max(total, 1)
+
+
+def collect_font_evidence(
+    page, is_first_page: bool = False, body_size: float | None = None
+) -> dict:
+    """收集页面的字号证据：正文字号、标题行（含层级）、首页小字印刷块。
+
+    body_size 传入文档级正文基准（第 0 页众数，逐页调用时由调用方算好
+    传入）；缺省时用本页众数（单页调用/测试用）。返回
+    {"body_size": float, "headings": [(norm, level)], "smallprint": [norm]}。"""
+    info = page.get_text("dict")
+    lines: list[dict] = []
+    for block in info.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            dx, _dy = line.get("dir", (1, 0))
+            if abs(dx) < 0.9:
+                continue  # 竖排行剔除（arXiv 印章等）
+            spans = [
+                s
+                for s in line.get("spans", [])
+                if s.get("text", "").strip() and s.get("size", 0) > 0
+            ]
+            if not spans:
+                continue
+            text = " ".join(s["text"].strip() for s in spans).strip()
+            norm = _md_norm(text)
+            if not norm:
+                continue  # 纯符号行；短行（含编号片段 '4'）保留参与同行合并
+            lines.append(
+                {
+                    "text": text,
+                    "norm": norm,
+                    "size": _quant(max(s["size"] for s in spans)),
+                    "bold": _line_bold_ratio(spans) >= _BOLD_LINE_RATIO,
+                    "y0": line["bbox"][1],
+                    "x0": line["bbox"][0],
+                }
+            )
+    if not lines:
+        return {"body_size": 0.0, "headings": [], "smallprint": []}
+
+    if body_size is None:
+        weight: dict[float, int] = {}
+        for ln in lines:
+            weight[ln["size"]] = weight.get(ln["size"], 0) + len(ln["norm"])
+        body = max(weight, key=weight.get)
+    else:
+        body = _quant(body_size)
+
+    # 标题候选：整行粗体 + 字号 ≥ 正文 + 非图表注 + 长度克制
+    # （纯编号行 '4.1' 允许入选——它要和同行标题文本合并还原编号，
+    # 合并后仍纯数字的组再丢弃）
+    def _heading_line(ln: dict) -> bool:
+        return (
+            ln["bold"]
+            and ln["size"] >= body
+            and not _FIG_CAPTION.match(ln["text"])
+            and len(ln["text"]) <= _HEAD_MAX_LEN
+            # 标题不以句号结尾：句号收尾的粗体行是表内强调句/run-in 引导
+            # 词（"Datasets." / "LLMs when solving ..." 实测）；问号/叹号
+            # 标题（问题式节标题）不受影响
+            and not ln["text"].rstrip().endswith((".", "。"))
+        )
+
+    cands = sorted(
+        (ln for ln in lines if _heading_line(ln)),
+        key=lambda ln: (ln["y0"], ln["x0"]),
+    )
+    # 排版惯例：标题首字符必为大写/数字/CJK——小写开头的粗体行是
+    # 表格单元格/正文片段（FG-RAG p3 表行实测）。纯数字行（编号片段）
+    # 允许进入下一步与同行标题文本合并。
+    cands = [
+        ln
+        for ln in cands
+        if (
+            ln["text"][0].isupper()
+            or ln["text"][0].isdigit()
+            or "\u4e00" <= ln["text"][0] <= "\u9fff"
+        )
+    ]
+    # 同行合并（编号与标题文本常被 span 拆成两段：'4' + 'Experiments'）
+    rows: list[list[dict]] = []
+    for ln in cands:
+        if rows and abs(ln["y0"] - rows[-1][-1]["y0"]) <= 2.0:
+            rows[-1].append(ln)
+            continue
+        rows.append([ln])
+    # 表列头剔除：同一行 ≥3 个并排粗体组 = 表格列头（真实标题不会
+    # 同行并排三个；双栏页左右各一标题只有 2 个，不受影响）
+    rows = [r for r in rows if len(r) < 3]
+    # 换行合并（两行标题）：下组不以编号开头才并（否则是下一个标题）
+    merged: list[list[dict]] = []
+    for r in rows:
+        head = sorted(r, key=lambda ln: ln["x0"])
+        if merged:
+            prev = merged[-1][-1]
+            nxt_starts_num = bool(_NUM_DEPTH.match(head[0]["text"]) or re.match(r"^\d+(\.\d+)*$", head[0]["text"]))
+            if (
+                abs(head[0]["size"] - prev["size"]) <= 0.5
+                and 0 < head[0]["y0"] - prev["y0"] <= 1.8 * max(head[0]["size"], prev["size"])
+                and not nxt_starts_num
+            ):
+                merged[-1].extend(head)
+                continue
+        merged.append(head)
+    max_bold_size = max((g[0]["size"] for g in merged), default=0.0)
+    # 合并后仍纯数字/符号的组（孤立编号行，没找到同行标题文本）丢弃
+    merged = [
+        g
+        for g in merged
+        if len(re.sub(r"[^a-zA-Z\u4e00-\u9fff]", "", " ".join(ln["text"] for ln in g))) >= 2
+    ]
+    headings = []
+    for group in merged:
+        size = max(ln["size"] for ln in group)
+        text = " ".join(ln["text"] for ln in group).strip()
+        norm = _md_norm(text)
+        if len(norm) < 4:
+            continue
+        m = _NUM_DEPTH.match(text)
+        if m:  # 编号深度定级（学界通用约定）
+            level = 2 if m.group(1).count(".") == 0 else 3
+        elif is_first_page and size >= body * _HEAD_TITLE_RATIO and size >= max_bold_size - 0.5:
+            level = 1  # 页 0 最大粗体行 = 文档标题
+        elif not is_first_page and size >= max_bold_size - 0.5:
+            level = 2  # 非首页的本页主标题档（如 ACL 的节标题 1.09×）
+        elif size >= body * _HEAD_L1_RATIO:
+            level = 1
+        elif size >= body * _HEAD_L2_RATIO:
+            level = 2
+        else:
+            level = 3
+        # 页 0 抑制：除文档标题/通用节名/编号节外，粗体短行整类是作者信息
+        if (
+            is_first_page
+            and level != 1
+            and not _NUM_DEPTH.match(text)
+            and not _is_generic_heading_text(text)
+        ):
+            continue
+        headings.append((norm, level))
+
+    # 首页小字印刷块：版权/权限声明区（合并相邻小字行为块）
+    smallprint: list[str] = []
+    if is_first_page:
+        smalls = sorted(
+            (ln for ln in lines if ln["size"] <= body * _SMALLPRINT_RATIO),
+            key=lambda ln: (ln["y0"], ln["x0"]),
+        )
+        blocks: list[list[dict]] = []
+        for ln in smalls:
+            if blocks:
+                prev = blocks[-1][-1]
+                if ln["y0"] - prev["y0"] <= 2.2 * max(ln["size"], prev["size"]):
+                    blocks[-1].append(ln)
+                    continue
+            blocks.append([ln])
+        for blk in blocks:
+            norm = _md_norm(" ".join(ln["text"] for ln in blk))
+            if len(norm) >= _SMALLPRINT_MIN_CHARS:
+                smallprint.append(norm)
+    return {"body_size": body, "headings": headings, "smallprint": smallprint}
+
+
+def apply_font_evidence(md: str, evidence: dict) -> str:
+    """把字号证据套到 VLM 平文本输出上（幂等，纯函数）：
+
+    - 命中标题行（归一化前缀互含 + 段落足够短防误提升正文）→ 加 #/##/###；
+    - 命中首页小字印刷块 → 整段剔除（版权/权限声明不翻译不展示）。"""
+    headings = evidence.get("headings") or []
+    smallprint = evidence.get("smallprint") or []
+    if not headings and not smallprint:
+        return md
+    parts = re.split(r"(\n\s*\n)", md)
+    out: list[str] = []
+    for para in parts:
+        if re.fullmatch(r"\n\s*\n", para or ""):
+            out.append(para)
+            continue
+        body = (para or "").strip()
+        if not body:
+            out.append(para)
+            continue
+        norm = _md_norm(body)
+        if norm and any(
+            norm.startswith(s[:24]) or s.startswith(norm[:24]) for s in smallprint
+        ):
+            out.append("")  # 小字印刷块剔除（保留分隔符占位，join 前过滤）
+            continue
+        if not body.startswith("#"):
+            for hnorm, level in headings:
+                if not hnorm:
+                    continue
+                # 双向前缀匹配 + 长度约束：段落要么是标题的前缀（更短），
+                # 要么只比标题长极少（防「以标题词开头的长正文段」误提升）
+                if hnorm.startswith(norm[:24]) or (
+                    norm.startswith(hnorm[:24]) and len(norm) <= len(hnorm) + 20
+                ):
+                    body = "#" * level + " " + body
+                    break
+        out.append(body)
+    md = "".join(out)
+    # 剔除段留下的空段收敛（三个以上连续换行压回两个）
+    return re.sub(r"\n{3,}", "\n\n", md).strip()
+
+
 def _normalize_image_refs(md: str, image_dir: str) -> str:
     """把 pymupdf4llm 生成的图片引用规整为「正斜杠绝对路径」，
     前端据此构造资源 URL（Tauri convertFileSrc / 浏览器 file/raw 接口）。"""
