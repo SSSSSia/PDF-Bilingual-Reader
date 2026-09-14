@@ -78,6 +78,10 @@ class Settings:
 
     def _default_translate(self) -> dict:
         # 默认英→中（2026-09-11 用户决策：学术阅读主场景是英文论文译中文）
+        # 默认档 = 免费模型（产品卖点：Qwen3-8B 在 SiliconFlow 免费，
+        # 阶段12-T7 确认维持）。付费质量档（如 DeepSeek-V4-Flash，
+        # ¥1/M token≈每篇 ¥0.1）是用户可选升级，见设置页「质量档位」说明，
+        # 不设为默认。
         return {
             "provider": "siliconflow",
             "api_key": "",

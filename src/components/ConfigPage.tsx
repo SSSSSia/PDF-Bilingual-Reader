@@ -385,6 +385,20 @@ export default function ConfigPage() {
               </select>
             </div>
           </div>
+
+          {/* 阶段12-T7：翻译质量档位说明。默认档保持免费（Qwen3-8B，
+              免费卖点不破）；付费档仅是可选项，不改变自配端点能力 */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3 text-xs leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
+            <p className="mb-1 font-medium text-slate-700 dark:text-slate-300">
+              质量档位（可选）
+            </p>
+            默认档 Qwen3-8B 在 SiliconFlow 免费，日常学术阅读够用。追求更高
+            译文质量可换付费模型：如 SiliconFlow 的{" "}
+            <code className="rounded bg-slate-200 px-1 py-0.5 text-[11px] text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+              deepseek-ai/DeepSeek-V4-Flash
+            </code>{" "}
+            （约 ¥1/百万 token，一篇论文全文约 ¥0.1）——Key 不变，改模型名即可。
+          </div>
         </ApiSection>
 
         <div className="flex items-center gap-3">
