@@ -40,6 +40,8 @@ from ocr.textlayer import (
     _insert_figures,
     _md_norm,
     _snapshot_figures,
+    apply_font_evidence,
+    collect_font_evidence,
     extract_page_md,
     MIN_TEXT_CHARS,
 )
@@ -429,6 +431,15 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
             parts.append(b[4] if len(b) > 4 else "")
         truth = "".join(parts)
         raw_text_len = len(page.get_text("text").strip())
+        # T9.4 兜底证据：版面信号缺席（运行时缺失/worker 失败/工具直调）
+        # 才采集字号证据——layout_ok=True 时版面模型的「本页无标题」是
+        # 可信判定，字号规则不得越权覆盖（fb182b5 冻结版，不新增规则）
+        font_evidence = None
+        if layout_regions is None:
+            try:
+                font_evidence = collect_font_evidence(page, is_first_page=(pno == 0))
+            except Exception as e:  # noqa: BLE001 —— 证据采集失败=无兜底，不阻断
+                print(f"[vlm] p{pno + 1}: 字号证据采集失败（跳过兜底）: {e}")
         return {
             "scanned": raw_text_len < MIN_TEXT_CHARS and not refs,
             "refs": refs,
@@ -436,6 +447,8 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
             "abandon_rects": lr["abandon"],
             "abandon_norms": abandon_norms,
             "layout_titles": layout_titles,
+            "layout_ok": layout_regions is not None,
+            "font_evidence": font_evidence,
             "raw_blocks": page.get_text("blocks"),
             "truth": truth,
         }
@@ -454,7 +467,8 @@ def _finalize_md(prep: dict, md: str) -> str:
       段落可定位坐标 + 左右各 ≥3 窄块 + 干净分栏沟），不满足即原样返回
       ——兜底只会纠正、不会搅乱；
     - abandon 段落剔除：遮罩/truth 扣除后的残留兜底（区域文本匹配）；
-    - title 提升编号定级：无版面信号时该步为空（字号证据兜底见 T9.4）。"""
+    - title 提升编号定级；版面信号缺席（layout_ok=False，T9.4）时落回
+      字号证据（fb182b5 冻结版：粗体+字号判标题/首页小字印刷块剔除）。"""
     if prep["refs"]:
         md = _insert_figures(
             md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
@@ -463,6 +477,8 @@ def _finalize_md(prep: dict, md: str) -> str:
     md = _drop_abandon_paragraphs(md, prep.get("abandon_norms") or [])
     if prep.get("layout_titles"):
         md = _promote_titles(md, prep["layout_titles"])
+    elif not prep.get("layout_ok"):
+        md = apply_font_evidence(md, prep.get("font_evidence") or {})
     return md
 
 

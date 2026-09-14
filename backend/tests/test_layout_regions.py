@@ -176,14 +176,66 @@ def test_finalize_md_drops_abandon_and_promotes_title(tmp_path):
 
 
 def test_finalize_md_without_layout_keeps_behavior(tmp_path):
-    """无版面信号（layout=None/None 区域）：行为与 T9 之前一致。"""
+    """无版面信号（T9.4 兜底激活）：字号证据登场——本合成 PDF 全文同字号
+    同字重，证据为空 → 输出不变（兜底无害性的下界）。"""
     pdf = str(tmp_path / "l.pdf")
     _make_layout_pdf(pdf)
     prep = vlm_parse._prepare(pdf, 0, str(tmp_path / "img"), None)
+    assert prep["layout_ok"] is False
+    assert prep["font_evidence"] is not None  # 兜底证据已采集
     md = "1 Introduction to the Synthetic Corpus\n\nBody paragraph alpha.\n\nPermission junk line."
     out = vlm_parse._finalize_md(prep, md)
-    assert "Permission junk line" in out       # 无区域 → 不剔除
-    assert not out.lstrip().startswith("#")    # 无区域 → 不提升
+    assert "Permission junk line" in out       # 无字号差异 → 无小字印刷判定
+    assert not out.lstrip().startswith("#")    # 无字号差异 → 无标题提升
+
+
+def _make_font_pdf(path) -> None:
+    """页 0：16pt 粗体标题 + 11pt 常规正文（字号证据可判）。"""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_textbox(
+        pymupdf.Rect(50, 45, 520, 90),
+        "Bold Big Title of the Font Evidence Page",
+        fontsize=16,
+        fontname="hebo",
+    )
+    page.insert_textbox(
+        pymupdf.Rect(50, 120, 545, 220),
+        "Regular body text at the default size for the font evidence corpus "
+        "with enough words to form a real paragraph.",
+    )
+    doc.save(path)
+    doc.close()
+
+
+def test_font_evidence_fallback_promotes_title(tmp_path):
+    """T9.4：版面信号缺席 → 字号证据把粗体大字标题提升为 #。"""
+    pdf = str(tmp_path / "f.pdf")
+    _make_font_pdf(pdf)
+    prep = vlm_parse._prepare(pdf, 0, str(tmp_path / "img"), None)
+    md = (
+        "Bold Big Title of the Font Evidence Page\n\n"
+        "Regular body text at the default size for the font evidence corpus "
+        "with enough words to form a real paragraph."
+    )
+    out = vlm_parse._finalize_md(prep, md)
+    assert "# Bold Big Title" in out
+    assert "Regular body text" in out
+
+
+def test_layout_ok_suppresses_font_fallback(tmp_path):
+    """T9.4 关键语义：版面模型成功出区域（即使本页无 title）→ 字号证据
+    不越权——「本页无标题」是版面模型的可信判定。"""
+    pdf = str(tmp_path / "f.pdf")
+    _make_font_pdf(pdf)
+    # 只给一个 abandon 区域：layout_ok=True 但无 title
+    regions = [{"label": "abandon", "conf": 0.9, "bbox": [40, 700, 575, 780]}]
+    prep = vlm_parse._prepare(pdf, 0, str(tmp_path / "img"), regions)
+    assert prep["layout_ok"] is True
+    assert prep["font_evidence"] is None  # 采集都被跳过
+    md = "Bold Big Title of the Font Evidence Page\n\nRegular body text goes here."
+    out = vlm_parse._finalize_md(prep, md)
+    assert not out.lstrip().startswith("#")  # 字号兜底未介入
 
 
 # ── parse_page_verified：遮罩含 abandon 区域 ─────────────────────
