@@ -74,6 +74,28 @@ def test_bag_f1_order_insensitive():
     assert vlm_parse.bag_f1("", "") == 0.0
 
 
+def test_verify_bag_immune_to_math_syntax():
+    """交叉校验口径：真值 Unicode 数学碎屑 vs VLM LaTeX 语法不稀释。"""
+    truth = "compute ∑𝑄𝑖 scores where 𝑄 is the query matrix and 𝑘 keys"
+    vlm = (
+        "compute \\(\\sum_{i} Q_i\\) scores where \\(Q\\) is the query "
+        "matrix and \\(k\\) keys"
+    )
+    assert vlm_parse.verify_bag(vlm, truth) >= 0.90
+
+
+def test_verify_bag_still_catches_real_loss():
+    truth = "first paragraph content " * 10 + "second paragraph content " * 10
+    assert vlm_parse.verify_bag("only first paragraph content" * 10, truth) < 0.90
+
+
+def test_verify_bag_keeps_cjk():
+    """中文文档：CJK 保留参与校验（不能被字母数字白名单剥空）。"""
+    truth = "知识图谱问答系统通过检索增强生成技术提升回答质量"
+    vlm = "知识图谱问答系统借助检索增强生成技术提高了回答的质量"
+    assert vlm_parse.verify_bag(vlm, truth) >= 0.70
+
+
 # ── 双栏几何判定 ─────────────────────────────────────────────────────
 
 
@@ -344,16 +366,18 @@ def test_verified_raw_cache_hit_skips_api(tmp_path):
 
 
 def test_verified_falls_back_on_low_bag(tmp_path):
-    """VLM 输出低质（bag 远低于阈值）→ 整页回退现行 textlayer 提取。"""
+    """VLM 输出低质（bag 远低于阈值）→ 整页回退现行 textlayer 提取；
+    低质原始输出不落缓存（下次运行自然重试，跨运行自愈）。"""
     pdf = str(tmp_path / "fig.pdf")
     _make_figure_pdf(pdf)
+    cache_dir = str(tmp_path / "cache")
     with patch(
         "ocr.vlm_parse._vlm_call",
         new=AsyncMock(side_effect=[("完全无关的输出", "stop")]),
     ):
         out = asyncio.run(
             vlm_parse.parse_page_verified(
-                pdf, 0, "hash2", str(tmp_path / "imgs"), _CFG, str(tmp_path / "cache")
+                pdf, 0, "hash2", str(tmp_path / "imgs"), _CFG, cache_dir
             )
         )
     assert out["source"] == "textlayer"
@@ -362,6 +386,10 @@ def test_verified_falls_back_on_low_bag(tmp_path):
     # 回退产物仍是完整文本层 markdown（正文/图注都在）
     assert "Body text paragraph" in out["md"]
     assert "Figure 1: A test figure caption" in out["md"]
+    # 低质原始解析不落缓存
+    assert (
+        read_cache(cache_dir, ocr_key("hash2", 0, vlm_parse.VLM_PARSE_MODEL)) is None
+    )
 
 
 def test_verified_falls_back_on_api_error(tmp_path):
@@ -379,6 +407,34 @@ def test_verified_falls_back_on_api_error(tmp_path):
         )
     assert out["source"] == "textlayer"
     assert out["fallback_reason"] == "empty"
+    assert "Body text paragraph" in out["md"]
+
+
+def test_verified_keeps_vlm_when_fallback_also_fails(tmp_path):
+    """降级路径自身异常（实测：链接注解损坏页 pymupdf4llm 崩）→ 保留
+    未校验 VLM 输出，绝不让单页失败炸掉整篇任务。"""
+    pdf = str(tmp_path / "fig.pdf")
+    _make_figure_pdf(pdf)
+    with patch(
+        "ocr.vlm_parse._vlm_call",
+        new=AsyncMock(side_effect=[(_GOOD_VLM_MD, "stop")]),
+    ), patch(
+        "ocr.vlm_parse.extract_page_md",
+        side_effect=IndexError("list index out of range"),
+    ), patch(
+        "ocr.vlm_parse._textlayer_fallback",
+        side_effect=IndexError("list index out of range"),
+    ):
+        # bag 人为压低触发降级：VLM 输出与 truth 无重叠字符的假场景
+        with patch("ocr.vlm_parse.verify_bag", return_value=0.1):
+            out = asyncio.run(
+                vlm_parse.parse_page_verified(
+                    pdf, 0, "hash6", str(tmp_path / "imgs"),
+                    _CFG, str(tmp_path / "cache"),
+                )
+            )
+    assert out["source"] == "vlm"
+    assert out["fallback_reason"] == "fallback_error"
     assert "Body text paragraph" in out["md"]
 
 

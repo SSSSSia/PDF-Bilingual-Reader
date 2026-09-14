@@ -67,6 +67,22 @@ def bag_f1(a: str, b: str) -> float:
     return 2 * inter / max(len(a) + len(b), 1)
 
 
+# 交叉校验专用剥离：只留字母/数字/CJK（T8 校准，2026-09-14 实测）。
+# 原因：真值数学是 Unicode 碎屑（NFKC 后仍含 ∑≤∈ 等符号），VLM 是
+# LaTeX 语法（\ { } ^ _），逐字符多重集在这两类表示间系统性稀释——
+# FG-RAG p3 数学页 0.8985（假性不达标）→ 字母数字口径 0.9008；而真实
+# 内容丢失（DALK p9 无框表被 VLM 丢弃）0.688→0.696 仍远低于阈值，
+# 防幻觉能力不受影响。中文文档靠 CJK 保留参与校验。
+_VERIFY_STRIP = re.compile(r"[^a-z0-9\u4e00-\u9fff]")
+
+
+def verify_bag(vlm_md: str, truth: str) -> float:
+    """交叉校验 bag：norm → 小写 → 剥离语法/符号字符后的多重集 F1。"""
+    a = _VERIFY_STRIP.sub("", norm(vlm_md).lower())
+    b = _VERIFY_STRIP.sub("", norm(truth).lower())
+    return bag_f1(a, b)
+
+
 def _render_png(
     file_path: str,
     pno: int,
@@ -319,6 +335,7 @@ async def parse_page_verified(
     raw_key = ocr_key(pdf_hash, pno, VLM_PARSE_MODEL)
     raw = read_cache(cache_dir, raw_key)
     md_raw, trunc = (raw or {}).get("md", ""), (raw or {}).get("trunc", 0)
+    fresh = False
     if not md_raw:
         try:
             # nullcontext 支持 async（3.10+）：sem 缺省时不限并发
@@ -327,20 +344,43 @@ async def parse_page_verified(
                     file_path, pno, config, mask_regions=prep["regions"]
                 )
             md_raw, trunc = res["md"], res["trunc"]
-            if md_raw:
-                write_cache(cache_dir, raw_key, {"md": md_raw, "trunc": trunc})
+            fresh = True
         except Exception as e:
             print(f"[vlm] p{pno + 1}: 结构化解析失败，回退文本层: {e}")
 
     truth_n = norm(prep["truth"])
-    bag = bag_f1(norm(md_raw), truth_n) if md_raw and truth_n else 0.0
-    accept = bool(md_raw) and (len(truth_n) < 60 or bag >= bag_threshold)
+    bag = verify_bag(md_raw, prep["truth"]) if md_raw and truth_n else 0.0
+    # 短 truth（近空页/纯图页）无从校验，接受 VLM 输出（无内容可损失）
+    accept = bool(md_raw) and (
+        len(_VERIFY_STRIP.sub("", truth_n.lower())) < 60
+        or bag >= bag_threshold
+    )
+    # 原始解析结果只在通过校验时落缓存：低质输出（实测 hosted 模型对
+    # 密集参考文献页偶发只回页码，bag≈0.002）不进缓存，下次运行自然
+    # 重试该页——跨运行自愈，不额外花费重试请求
+    if fresh and md_raw and accept:
+        write_cache(cache_dir, raw_key, {"md": md_raw, "trunc": trunc})
     if accept:
         md = await asyncio.to_thread(_finalize_md, prep, md_raw)
         return {"md": md, "source": "vlm", "bag": round(bag, 4), "trunc": trunc}
-    md = await asyncio.to_thread(
-        _textlayer_fallback, file_path, pno, image_dir, prep
-    )
+    # 降级路径自身也失败（实测：pymupdf4llm 在链接注解损坏的页崩，
+    # FG-RAG p6-12）→ 保留未校验的 VLM 输出——好过整页空掉，日志留痕
+    try:
+        md = await asyncio.to_thread(
+            _textlayer_fallback, file_path, pno, image_dir, prep
+        )
+    except Exception as e:
+        print(f"[vlm] p{pno + 1}: textlayer 降级亦失败（{e}），保留未校验 VLM 输出")
+        md = (
+            await asyncio.to_thread(_finalize_md, prep, md_raw) if md_raw else ""
+        )
+        return {
+            "md": md,
+            "source": "vlm",
+            "bag": round(bag, 4),
+            "trunc": trunc,
+            "fallback_reason": "fallback_error",
+        }
     reason = "empty" if not md_raw else ("no_truth" if not truth_n else "bag")
     return {
         "md": md,
