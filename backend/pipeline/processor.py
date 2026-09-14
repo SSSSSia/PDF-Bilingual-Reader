@@ -9,6 +9,7 @@ from typing import Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import settings
+from ocr import vlm_parse
 from ocr.siliconflow import call_ocr, split_into_blocks
 from ocr.textlayer import extract_pages, count_pages, MIN_TEXT_CHARS
 from translate.base import translate_batch, translate_text
@@ -56,7 +57,11 @@ MAX_CONCURRENCY = 8
 # 命中旧译文，仅标题等变化块重译一次
 # v17→v18（2026-09-13 提取栈钉扎）：pymupdf 1.28.2→1.26.4 / pymupdf4llm
 # 1.28.2→0.0.27，提取产物回归 classic 基线，旧文本层缓存整体失效重建
-TEXT_LAYER_MODEL = "text-layer-v18"
+# v18→v19（2026-09-14 阶段12-T4 识别引擎混合架构）：数字页主路线换
+# 「快照+遮罩 → PaddleOCR-VL 整页结构化解析 → 交叉校验降级」（公式定界
+# LaTeX/复杂版式完整度提升，见 docs/VLM结构化解析对比.md），textlayer
+# 变为降级路径；翻译缓存按 text_hash 键控，未变化文本免重译
+TEXT_LAYER_MODEL = "text-layer-v19"
 
 # 视觉 OCR 缓存版本后缀。v2：OCR 结果顶部插入整页快照（扫描页图片/表格可见），
 # 旧缓存无快照需失效——会使扫描页重跑一次视觉 OCR（产生一次 API 调用）。
@@ -168,7 +173,15 @@ async def run_pipeline(file_path: str) -> dict:
         "error": None,
         # 阶段11-T5：F5 后前端丢 job_id，凭 file_path 在 running 列表里发现并重接管
         "file_path": file_path,
-        "stats": {"ocr_cache_hit": 0, "ocr_total": 0, "tr_cache_hit": 0, "tr_total": 0},
+        "stats": {
+            "ocr_cache_hit": 0,
+            "ocr_total": 0,
+            "tr_cache_hit": 0,
+            "tr_total": 0,
+            # 阶段12-T4：VLM 主路线页数 / 交叉校验降级页数（前端进度页可见）
+            "vlm_pages": 0,
+            "vlm_fallback": 0,
+        },
     }
 
     asyncio.create_task(_process_pipeline(file_path, job_id, pdf_hash))
@@ -451,25 +464,32 @@ def _remove_running_header(pages: list, doc_title: str) -> None:
 
 
 async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dict) -> list:
-    """混合 OCR（修复"内容不全"）+ 页级流式挂载（阶段1-T5）：
+    """混合提取 + 页级流式挂载（阶段1-T5；阶段12-T4 数字页主路线换 VLM）：
 
-    1. 文本层优先——电子版 PDF 直接完整提取，零 API 成本；
-    2. **逐页提取、逐页挂载**：pymupdf4llm 单页约 0.5s（表格检测为主，
-       线程并行实测无效——GIL），整篇 12 页约 6s。改为页级流式后
-       首页约 1 秒即可见，后续页边提取边出现；
-    3. 文本层缓存命中的页毫秒级直接挂载（重跑同一文件秒开）；
-    4. 无文本层的扫描页先挂空占位（保持页序对齐），提取完成后统一走
-       视觉 OCR（只调这些页），结果原地替换占位；
-    5. 两类结果统一按页缓存（文本层用伪模型名，与视觉模型缓存隔离）。"""
+    1. 数字页主路线：PaddleOCR-VL 整页结构化解析（快照→遮罩→解析→
+       交叉校验，bag<阈值/空输出/API 失败整页回退 textlayer——最坏=现状，
+       详见 ocr/vlm_parse.parse_page_verified）；
+    2. 扫描页（无文本层）：先挂空占位（保持页序对齐），提取循环结束后
+       统一走视觉 OCR（只调这些页），结果原地替换占位；
+    3. 逐页挂载渐进呈现：缓存命中毫秒级；VLM 页并发受限（免费档保守值），
+       任务一次性创建、按页序 await——首页就绪即挂载，前端页序稳定；
+    4. 两类结果统一按页缓存（伪模型名隔离），重跑同一文件秒开。
+
+    vlm 关闭开关（config.json 的 ocr.vlm.enabled=false，或未配 API Key）
+    → 整体回退旧文本层路径，行为与 v18 一致。
+    """
     cache_dir = settings.cache_dir
     vision_model = config.get("model", "")
 
     # 页数探测（毫秒级）
     total_pages = await asyncio.to_thread(count_pages, file_path)
     job["stats"]["ocr_total"] = total_pages
+    # 兼容最小 job dict（smoke 工具直调本函数时不带新计数键）
+    job["stats"].setdefault("vlm_pages", 0)
+    job["stats"].setdefault("vlm_fallback", 0)
 
     # 渐进挂载：job_pages 与最终结果同一列表，前端轮询即见逐页增长
-    job_pages: list = []
+    job_pages: list = [{"page": i, "blocks": []} for i in range(total_pages)]
     job["pages"] = job_pages
     job["progress"] = 8
 
@@ -478,32 +498,100 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
     pages: list = [None] * total_pages
     vision_pages: list[int] = []
 
+    vlm_cfg = config.get("vlm") or {}
+    vlm_enabled = vlm_cfg.get("enabled", True) and bool(config.get("api_key"))
+    bag_threshold = float(vlm_cfg.get("bag_threshold", 0.90))
+    sem = asyncio.Semaphore(vlm_parse.CONCURRENCY)
+    pending: dict[int, asyncio.Task] = {}
+
     for i in range(total_pages):
-        # 文本层缓存命中 → 直接挂载
+        # 最终产物缓存命中 → 直接挂载（VLM/降级来源随缓存记录，供 stats）
         cached = read_cache(cache_dir, ocr_key(pdf_hash, i, TEXT_LAYER_MODEL))
         if cached and cached.get("blocks"):
             pages[i] = {"page": i, "blocks": cached["blocks"]}
+            job_pages[i] = pages[i]
             job["stats"]["ocr_cache_hit"] += 1
+            if cached.get("source") == "textlayer":
+                job["stats"]["vlm_fallback"] += 1
+            else:
+                job["stats"]["vlm_pages"] += 1
+        elif vlm_enabled:
+            # 全部页任务先行创建，第二循环按页序 await（并发由 sem 闸住）
+            pending[i] = asyncio.create_task(
+                vlm_parse.parse_page_verified(
+                    file_path,
+                    i,
+                    pdf_hash,
+                    image_dir,
+                    config,
+                    cache_dir,
+                    bag_threshold=bag_threshold,
+                    sem=sem,
+                )
+            )
         else:
             md = (await asyncio.to_thread(extract_pages, file_path, [i], image_dir))[0]
             if md:  # 有文本层
                 blocks = [_single_block(i, md)]
                 write_cache(
-                    cache_dir, ocr_key(pdf_hash, i, TEXT_LAYER_MODEL), {"blocks": blocks}
+                    cache_dir,
+                    ocr_key(pdf_hash, i, TEXT_LAYER_MODEL),
+                    {"blocks": blocks, "source": "textlayer"},
                 )
                 pages[i] = {"page": i, "blocks": blocks}
+                job_pages[i] = pages[i]
             else:  # 无文本层 → 视觉路线（先查缓存，未命中挂占位保持页序）
                 vcached = read_cache(
                     cache_dir, ocr_key(pdf_hash, i, vision_model + VISION_CACHE_SUFFIX)
                 )
                 if vcached and vcached.get("blocks"):
                     pages[i] = {"page": i, "blocks": vcached["blocks"]}
+                    job_pages[i] = pages[i]
                     job["stats"]["ocr_cache_hit"] += 1
                 else:
                     vision_pages.append(i)
-                    pages[i] = {"page": i, "blocks": []}
-        job_pages.append(pages[i])
-        job["progress"] = 8 + int((i + 1) / total_pages * 22)
+
+    # 按页序等待 VLM 任务：首页就绪即挂载（页级流式），失败传播前先取消
+    # 其余任务（防孤儿任务与「exception never retrieved」噪音）
+    try:
+        for i in range(total_pages):
+            if pages[i] is not None or i not in pending:
+                job["progress"] = 8 + int((i + 1) / total_pages * 22)
+                continue
+            res = await pending[i]
+            if res.get("scanned"):
+                vcached = read_cache(
+                    cache_dir,
+                    ocr_key(pdf_hash, i, vision_model + VISION_CACHE_SUFFIX),
+                )
+                if vcached and vcached.get("blocks"):
+                    pages[i] = {"page": i, "blocks": vcached["blocks"]}
+                    job_pages[i] = pages[i]
+                    job["stats"]["ocr_cache_hit"] += 1
+                else:
+                    vision_pages.append(i)  # 保持占位，循环后统一视觉 OCR
+            else:
+                blocks = [_single_block(i, res["md"] or "")]
+                write_cache(
+                    cache_dir,
+                    ocr_key(pdf_hash, i, TEXT_LAYER_MODEL),
+                    {"blocks": blocks, "source": res["source"], "bag": res.get("bag")},
+                )
+                if res["source"] == "vlm":
+                    job["stats"]["vlm_pages"] += 1
+                else:
+                    job["stats"]["vlm_fallback"] += 1
+                    print(
+                        f"[vlm] p{i + 1}: 交叉校验降级文本层 "
+                        f"reason={res.get('fallback_reason')} bag={res.get('bag')}"
+                    )
+                pages[i] = {"page": i, "blocks": blocks}
+                job_pages[i] = pages[i]
+            job["progress"] = 8 + int((i + 1) / total_pages * 22)
+    except Exception:
+        for t in pending.values():
+            t.cancel()
+        raise
 
     # 扫描页走视觉 OCR（只调缺的页），结果原地替换占位。
     # page_image_dir：扫描页整页快照存盘并插入正文顶部（原模原样展示）。

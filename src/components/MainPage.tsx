@@ -469,7 +469,7 @@ export default function MainPage() {
           title={
             runningJob.job.progress >= EXTRACT_DONE
               ? "点击进入阅读页（翻译继续中，可边译边读）"
-              : "正在提取原文排版，完成后自动进入"
+              : "正在结构化解析原文（公式/版式识别），完成后自动进入"
           }
           className={`card mt-5 px-4 py-3.5 animate-fade-in transition-colors duration-150 ${
             runningJob.job.progress >= EXTRACT_DONE
@@ -481,7 +481,7 @@ export default function MainPage() {
             <p className="min-w-0 truncate text-sm text-slate-700 dark:text-slate-300">
               {runningJob.job.progress >= EXTRACT_DONE
                 ? "正在翻译："
-                : "提取原文排版："}
+                : "结构化解析原文："}
               <span className="font-medium text-slate-900 dark:text-slate-100">
                 {runningJob.snapshot.fileName}
               </span>
