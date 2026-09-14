@@ -376,6 +376,10 @@ PDF-Reader/
 - 「原版PDF·左右对照」（排版对照导出）功能由 BabelDOC 提供，其版权归 funstory-ai 及
   BabelDOC 项目原作者所有；应用内置的模型 [DocLayout-YOLO-DocStructBench-onnx](https://github.com/opendatalab/DocLayout-YOLO)
   权重署名与许可声明予以保留。
+- **重排版三模式的版面结构信号**（标题层级/图表区域/版权噪音判定，2026-09 阶段12-T9）
+  同样经**独立子进程**调用随包 BabelDOC 运行时内的 DocLayout-YOLO（AGPL-3.0）——
+  与导出功能同一条进程隔离边界（不链接、不修改其源码），运行时缺失时自动降级为
+  本地字号几何证据，功能不失效。
 - 本应用定位为本地工具，不分发 BabelDOC 本体；用户在安装/使用该功能时由应用引导
   自行获取，AGPL 合规边界与上述集成方式一致。
 - 其余依赖（FastAPI、PyMuPDF、React 等均为 MIT/BSD/Apache 系许可）详见
