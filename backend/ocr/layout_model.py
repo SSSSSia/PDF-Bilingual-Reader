@@ -27,6 +27,48 @@ LAYOUT_CACHE_MODEL = "doclayout-v1"
 # 静默即挂死——首行前的模型加载 ~3s + 偶发权重下载，150s 足够宽。
 LINE_SILENCE_TIMEOUT = 150.0
 
+# ── 区域去重（阶段12-T9.3，纯几何规则）─────────────────────────────
+# 决策文档 §2 已知边界：模型偶发对同一区域复检两次（其一置信 0.3~0.6）；
+# "Algorithm 1" 伪代码框被判低置信 table（0.26~0.42）。真实信号实测
+# 0.72+（title 0.84-0.95 / abandon 0.72-0.92 / table 0.76-0.97）——
+# 0.6 下限滤除复检框与伪代码框（不误伤也拿不到快照，登记观察项），
+# 同 label IoU>0.6 只保留置信最高者；跨 label 不判重（消费端分通道
+# 各有豁免逻辑，title 与 plain text 区域重叠是常态）。
+REGION_CONF_FLOOR = 0.6
+REGION_IOU_DEDUPE = 0.6
+
+
+def _iou(a: list, b: list) -> float:
+    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
+    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(ix1 - ix0, 0.0) * max(iy1 - iy0, 0.0)
+    if inter <= 0:
+        return 0.0
+    area_a = max(a[2] - a[0], 0.0) * max(a[3] - a[1], 0.0)
+    area_b = max(b[2] - b[0], 0.0) * max(b[3] - b[1], 0.0)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def dedupe_regions(regions: list) -> list:
+    """置信下限 + 同 label IoU 判重。输入顺序无关，输出按 (y0, x0) 稳定排序。"""
+    kept: list[dict] = []
+    candidates = [
+        r for r in regions or []
+        if isinstance(r, dict) and isinstance(r.get("bbox"), (list, tuple))
+        and len(r["bbox"]) == 4
+        and float(r.get("conf") or 0.0) >= REGION_CONF_FLOOR
+    ]
+    for reg in sorted(candidates, key=lambda r: -float(r.get("conf") or 0.0)):
+        if any(
+            k.get("label") == reg.get("label") and _iou(k["bbox"], reg["bbox"]) > REGION_IOU_DEDUPE
+            for k in kept
+        ):
+            continue
+        kept.append(reg)
+    kept.sort(key=lambda r: (r["bbox"][1], r["bbox"][0]))
+    return kept
+
 
 def _worker_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout_worker.py")
@@ -222,12 +264,16 @@ class LayoutProvider:
     # ── 消费接口 ────────────────────────────────────────────────────
 
     async def regions(self, page: int) -> list[dict] | None:
-        """该页版面区域；未请求/缓存无产出/失败 → None（调用方走兜底）。"""
+        """该页版面区域（T9.3 去重后）；未请求/无产出/失败 → None（走兜底）。
+
+        去重放在读取口而非写入口：缓存保持模型原始产出，去重规则升级
+        无需失效区域缓存，且缓存命中的旧条目同样被覆盖。"""
         fut = self._futures.get(page)
         if fut is None:
             return None
         regions = await fut
         if regions:
+            regions = dedupe_regions(regions)
             self.stats["used"] += 1
         return regions
 

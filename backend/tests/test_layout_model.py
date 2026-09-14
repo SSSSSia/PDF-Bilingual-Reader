@@ -209,3 +209,82 @@ def test_regions_unrequested_page_is_none(tmp_path, monkeypatch):
     r = asyncio.run(run())
     assert p.status == "done"
     assert r is None
+
+
+# ── T9.3 区域去重（纯几何）───────────────────────────────────────
+
+from ocr.layout_model import dedupe_regions  # noqa: E402
+
+
+def test_dedupe_conf_floor_boundary():
+    regions = [
+        {"label": "table", "conf": 0.599, "bbox": [10, 10, 200, 100]},
+        {"label": "table", "conf": 0.60, "bbox": [20, 20, 210, 110]},
+    ]
+    out = dedupe_regions(regions)
+    assert len(out) == 1 and out[0]["conf"] == 0.60  # 下限含边界；0.599 滤除
+
+
+def test_dedupe_same_label_iou_keeps_highest_conf():
+    regions = [
+        {"label": "title", "conf": 0.84, "bbox": [40, 40, 500, 90]},
+        {"label": "title", "conf": 0.75, "bbox": [42, 42, 498, 88]},  # IoU≈0.95
+        {"label": "title", "conf": 0.9, "bbox": [40, 200, 500, 250]},  # 不重叠
+    ]
+    out = dedupe_regions(regions)
+    assert len(out) == 2
+    confs = {r["conf"] for r in out}
+    assert confs == {0.84, 0.9}  # 高置信复检框被吞，离散框保留
+
+
+def test_dedupe_cross_label_overlap_kept():
+    # title 与 plain text 同区域重叠：跨 label 不判重（消费端分通道）
+    regions = [
+        {"label": "title", "conf": 0.9, "bbox": [40, 40, 500, 90]},
+        {"label": "plain text", "conf": 0.8, "bbox": [40, 40, 500, 90]},
+    ]
+    assert len(dedupe_regions(regions)) == 2
+
+
+def test_dedupe_output_sorted_by_yx_and_robust_to_malformed():
+    regions = [
+        {"label": "table", "conf": 0.9, "bbox": [10, 300, 200, 400]},
+        {"label": "abandon", "conf": 0.8, "bbox": [0, 700, 600, 780]},
+        {"label": "title", "conf": 0.9, "bbox": [40, 40, 500, 90]},
+        {"label": "title", "conf": 0.9, "bbox": [1, 2]},      # 畸形
+        {"label": "abandon", "conf": 0.9},                     # 无 bbox
+        "not-a-dict",                                          # 非法类型
+    ]
+    out = dedupe_regions(regions)
+    ys = [r["bbox"][1] for r in out]
+    assert ys == sorted(ys)
+    assert len(out) == 3
+
+
+def test_provider_regions_applies_dedupe(tmp_path, monkeypatch):
+    """读取口去重：worker 原始产出（含复检框/低置信框）→ regions() 已净化。"""
+    proc = _FakeProc(_FakeStream([
+        _ndline({"page": 0, "regions": [
+            {"label": "table", "conf": 0.92, "bbox": [55, 292, 365, 395]},
+            {"label": "table", "conf": 0.45, "bbox": [56, 293, 364, 394]},  # 低置信复检
+            {"label": "abandon", "conf": 0.85, "bbox": [40, 695, 575, 775]},
+        ]}),
+        _ndline({"done": True}),
+    ]))
+    p, _ = _make_provider(tmp_path, monkeypatch, proc=proc)
+
+    async def run():
+        await p.start([0])
+        r = await p.regions(0)
+        for fut in p._futures.values():
+            await fut
+        for _ in range(200):
+            if p._reader is None or p._reader.done():
+                break
+            await asyncio.sleep(0.01)
+        return r
+
+    r = asyncio.run(run())
+    asyncio.run(p.close())
+    assert r is not None and len(r) == 2  # 0.45 复检框已滤
+    assert {x["label"] for x in r} == {"table", "abandon"}
