@@ -420,3 +420,44 @@ def test_verified_short_truth_accepts_vlm(tmp_path):
             )
         )
     assert out["source"] == "vlm"
+
+
+# ── 顺序几何兜底与噪音覆盖（阶段12-T5）──────────────────────────────
+
+
+def test_finalize_md_repairs_column_swap(tmp_path):
+    """VLM 整栏交换（DALK p2 反例形态）→ 高置信双栏页几何重排纠正。"""
+    pdf = str(tmp_path / "two.pdf")
+    _make_pdf(pdf, two_col=True)
+    prep = vlm_parse._prepare(pdf, 0, None)
+    left = [f"Left column block number {k}" for k in range(3)]
+    right = [f"Right column block number {k}" for k in range(3)]
+    swapped = "\n\n".join(right + left)  # 全部段落可定位坐标才触发重排
+    out = vlm_parse._finalize_md(prep, swapped)
+    assert out.index("Left column block number 0") < out.index(
+        "Right column block number 0"
+    )
+    assert out.index("Left column block number 2") < out.index(
+        "Right column block number 0"
+    )
+
+
+def test_finalize_md_leaves_unmatched_order_alone(tmp_path):
+    """段落定位不到坐标（VLM 改写措辞）→ 不重排，原样返回（防搅乱）。"""
+    pdf = str(tmp_path / "two.pdf")
+    _make_pdf(pdf, two_col=True)
+    prep = vlm_parse._prepare(pdf, 0, None)
+    md = "# Title\n\nCompletely paraphrased text that matches no block.\n\nMore unmatched words here."
+    assert vlm_parse._finalize_md(prep, md) == md
+
+
+def test_vlm_noise_blocks_filtered_downstream():
+    """VLM 输出残留的页码/页眉/页脚行由 split_into_blocks 过滤（T5 验证覆盖）。"""
+    from ocr.siliconflow import split_into_blocks
+
+    md = (
+        "# 3 Method\n\nThe encoder maps inputs to outputs.\n\n2195\n\n"
+        "Peng et al.\n\narXiv:1706.03762v7 [cs.CL] 3 Dec 2024"
+    )
+    parts = split_into_blocks(md)
+    assert parts == ["# 3 Method", "The encoder maps inputs to outputs."]

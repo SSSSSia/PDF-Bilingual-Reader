@@ -33,6 +33,7 @@ import pymupdf
 
 from ocr import siliconflow
 from ocr.textlayer import (
+    _column_reading_order,
     _figure_inner_text_rects,
     _insert_figures,
     _snapshot_figures,
@@ -255,17 +256,20 @@ def _prepare(file_path: str, pno: int, image_dir: str | None) -> dict:
 
 
 def _finalize_md(prep: dict, md: str) -> str:
-    """快照引用按 caption 锚定插回 VLM 输出。
+    """快照引用插回 + 双栏顺序几何兜底（阶段12-T5）。
 
-    几何配对用 PDF raw_blocks 的 caption 真实坐标（与 textlayer 同款
-    _insert_figures），在 VLM 输出的 markdown 里按 caption 文本定位插入
-    点（_find_para_pos 归一化前缀互含）——VLM 看得见快照区域外的 caption
-    （遮罩只盖区域内），锚点天然存在。"""
-    if not prep["refs"]:
-        return md
-    return _insert_figures(
-        md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
-    )
+    - 插回：几何配对用 PDF raw_blocks 的 caption 真实坐标（与 textlayer
+      同款 _insert_figures），在 VLM 输出里按 caption 文本定位插入点——
+      VLM 看得见快照区域外的 caption（遮罩只盖区域内），锚点天然存在；
+    - 顺序兜底：VLM 偶发整栏交换（A/B 实测 DALK p2 反例：内容完整 bag
+      0.99、双栏整栏互换）。_column_reading_order 自带高置信门槛（全部
+      段落可定位坐标 + 左右各 ≥3 窄块 + 干净分栏沟），不满足即原样返回
+      ——兜底只会纠正、不会搅乱。"""
+    if prep["refs"]:
+        md = _insert_figures(
+            md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
+        )
+    return _column_reading_order(prep["raw_blocks"], md)
 
 
 def _textlayer_fallback(file_path: str, pno: int, image_dir: str | None, prep: dict) -> str:
