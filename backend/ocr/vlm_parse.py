@@ -21,6 +21,7 @@
 """
 import asyncio
 import base64
+import os
 import time
 import unicodedata
 import re
@@ -30,6 +31,12 @@ import httpx
 import pymupdf
 
 from ocr import siliconflow
+from ocr.textlayer import (
+    _figure_inner_text_rects,
+    _insert_figures,
+    _snapshot_figures,
+    MIN_TEXT_CHARS,
+)
 
 # 双栏判定的通栏块阈值：与 textlayer._column_reading_order 同口径
 _COL_WIDE = 0.55
@@ -191,3 +198,68 @@ async def parse_page(
                 trunc += 1
         text = "\n\n".join(p for p in parts if p.strip())
     return {"md": text, "trunc": trunc, "elapsed": time.perf_counter() - t0}
+
+
+# ── 快照/遮罩/truth 协同（阶段12-T2）─────────────────────────────────
+
+
+def _prepare(file_path: str, pno: int, image_dir: str | None) -> dict:
+    """页级准备（阻塞，调用方放线程）：快照 + truth + 几何信息。
+
+    - 快照复用 textlayer._snapshot_figures（含 sidecar、v5 表格=快照
+      决策）——VLM 路线的遮罩、truth 扣除与文本层降级路径必须同区域
+      才自洽；
+    - 快照必须先于遮罩渲染：_figure_regions 依赖 cluster_drawings，
+      先画白底矩形会把遮罩本身当成绘图簇；
+    - truth = 文本层字符流扣除快照区域内部文本（图注豁免，与 redact
+      同判定）——交叉校验（T3）的比对基准，快照承载的内容不要求 VLM
+      复述；
+    - scanned 分类与 extract_pages 有效性判定同口径：短文本 + 无快照
+      = 扫描页，维持既有视觉通道。
+    """
+    doc = pymupdf.open(file_path)
+    try:
+        if image_dir:
+            # 目录必须存在：pix.save 对不存在的目录抛错（extract_pages
+            # 同款兜底，曾把快照管线静默打空的实测踩坑）
+            os.makedirs(image_dir, exist_ok=True)
+        refs, snap_regions = (
+            _snapshot_figures(doc, pno, image_dir) if image_dir else ([], [])
+        )
+        page = doc[pno]
+        inner = _figure_inner_text_rects(page, snap_regions) if snap_regions else []
+        parts = []
+        for b in page.get_text("blocks"):
+            r = pymupdf.Rect(b[:4])
+            # inner 里的矩形就是被剔除块自身的 bbox（_figure_inner_text_rects
+            # 按块主体 60% 落在区域内筛选），重叠 ≥60% 即同一块
+            if any(
+                (r & ir).get_area() >= 0.6 * max(r.get_area(), 1.0) for ir in inner
+            ):
+                continue
+            parts.append(b[4] if len(b) > 4 else "")
+        truth = "".join(parts)
+        raw_text_len = len(page.get_text("text").strip())
+        return {
+            "scanned": raw_text_len < MIN_TEXT_CHARS and not refs,
+            "refs": refs,
+            "regions": snap_regions,
+            "raw_blocks": page.get_text("blocks"),
+            "truth": truth,
+        }
+    finally:
+        doc.close()
+
+
+def _finalize_md(prep: dict, md: str) -> str:
+    """快照引用按 caption 锚定插回 VLM 输出。
+
+    几何配对用 PDF raw_blocks 的 caption 真实坐标（与 textlayer 同款
+    _insert_figures），在 VLM 输出的 markdown 里按 caption 文本定位插入
+    点（_find_para_pos 归一化前缀互含）——VLM 看得见快照区域外的 caption
+    （遮罩只盖区域内），锚点天然存在。"""
+    if not prep["refs"]:
+        return md
+    return _insert_figures(
+        md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
+    )

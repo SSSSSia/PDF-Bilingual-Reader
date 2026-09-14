@@ -745,6 +745,66 @@ def count_pages(file_path: str) -> int:
         doc.close()
 
 
+def extract_page_md(
+    doc,
+    file_path: str,
+    pno: int,
+    image_dir: str | None,
+    refs: list[str],
+    snap_regions: list,
+) -> str:
+    """单页文本层提取（pymupdf4llm + 全部清洗/插图锚定/列序链）。
+
+    从 extract_pages 拆出（阶段12-T2）：快照由调用方先行完成并传入
+    （refs/snap_regions）——VLM 主路线的降级路径与文本层路线必须共用
+    同一份 _snapshot_figures 产物，遮罩、truth 扣除、redact 三者同区域
+    才自洽。返回 markdown（可能为空，页有效性判定归调用方）。"""
+    # 1) 提取文本：有图表区域的页在 redact 副本上提取
+    page = doc[pno]
+    regions = snap_regions if refs else []
+    inner = _figure_inner_text_rects(page, regions) if regions else []
+    raw_blocks: list = []
+    if inner and refs:
+        with pymupdf.open(file_path) as doc2:
+            page2 = doc2[pno]
+            for r in inner:
+                page2.add_redact_annot(r)
+            try:
+                page2.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE)
+            except TypeError:
+                page2.apply_redactions()
+            chunks = pymupdf4llm.to_markdown(doc2, page_chunks=True, pages=[pno])
+            # 阅读顺序重排的坐标基准必须与提取源一致（redact 后的
+            # 副本），且必须在 doc2 存活期内取块（close 后 page 失效）
+            raw_blocks = page2.get_text("blocks")
+        print(f"[figure] p{pno + 1}: redact 图内文本块 {len(inner)} 个")
+    else:
+        chunks = pymupdf4llm.to_markdown(doc, page_chunks=True, pages=[pno])
+        raw_blocks = page.get_text("blocks")
+    c = chunks[0] if chunks else {}
+    md = (c.get("text") or "").strip()
+    if not md:
+        return ""
+    md = _clean_html(md)
+    # 斜体误判上标还原（DALK 实测 ⁱⁿⁱtⁱal/ⁿode/post⁻processⁱⁿg）
+    md = _fix_italic_superscripts(md)
+    # 伪标题降级：大字号强调句被误判成标题会巨字渲染+翻译劣化。
+    # 页 0 首个标题是论文标题的位置证据，豁免长标题降级
+    # （DALK/FG-RAG 标题丢失根治，2026-09-12）
+    md = _demote_sentence_headings(md, protect_first=(pno == 0))
+    # 跨栏粘连段拆分：单位行+行中 Abstract 标题+右栏片段合成一段
+    md = _split_glued_columns(md)
+    if image_dir:
+        md = _normalize_image_refs(md, image_dir)
+        # 先锚定插图（此时 markdown 仍是页面 y 带顺序），再列重排。
+        # v2 几何配对：用 caption 块坐标就近匹配快照区域，
+        # 序号配对在双栏页上会把图配错 caption（DALK p7 实测）
+        md = _insert_figures(md, refs, snap_regions=snap_regions, raw_blocks=raw_blocks)
+    # 列重排：图片引用段跟随其 caption 同进同退
+    md = _column_reading_order(raw_blocks, md)
+    return md
+
+
 def extract_pages(
     file_path: str, page_nums: list[int], image_dir: str | None = None
 ) -> list[str | None]:
@@ -771,62 +831,14 @@ def extract_pages(
             # 快照管线静默打空（目录由调用方建时新文件首跑必炸，实测踩坑）
             os.makedirs(image_dir, exist_ok=True)
         out: list[str | None] = []
-        for idx, pno in enumerate(page_nums):
-            # 1) 先在原文档上快照（渲染含图内文字，所见即所得）。
-            #    返回最终区域（外扩+表头吸收）——redact 必须用同一区域，
-            #    否则快照里有的文字在正文残留（表头翻译两遍，实测踩坑）
+        for pno in page_nums:
+            # 快照先行（渲染含图内文字，所见即所得）。最终区域（外扩+
+            # 表头吸收）传给 extract_page_md——redact 必须用同一区域，
+            # 否则快照里有的文字在正文残留（表头翻译两遍，实测踩坑）
             refs, snap_regions = (
                 _snapshot_figures(doc, pno, image_dir) if image_dir else ([], [])
             )
-            # 2) 提取文本：有图表区域的页在 redact 副本上提取
-            page = doc[pno]
-            regions = snap_regions if refs else []
-            inner = _figure_inner_text_rects(page, regions) if regions else []
-            raw_blocks: list = []
-            if inner and refs:
-                with pymupdf.open(file_path) as doc2:
-                    page2 = doc2[pno]
-                    for r in inner:
-                        page2.add_redact_annot(r)
-                    try:
-                        page2.apply_redactions(
-                            images=pymupdf.PDF_REDACT_IMAGE_NONE
-                        )
-                    except TypeError:
-                        page2.apply_redactions()
-                    chunks = pymupdf4llm.to_markdown(
-                        doc2, page_chunks=True, pages=[pno]
-                    )
-                    # 阅读顺序重排的坐标基准必须与提取源一致（redact 后的
-                    # 副本），且必须在 doc2 存活期内取块（close 后 page 失效）
-                    raw_blocks = page2.get_text("blocks")
-                if refs:
-                    print(f"[figure] p{pno + 1}: redact 图内文本块 {len(inner)} 个")
-            else:
-                chunks = pymupdf4llm.to_markdown(doc, page_chunks=True, pages=[pno])
-                raw_blocks = page.get_text("blocks")
-            c = chunks[0] if chunks else {}
-            md = (c.get("text") or "").strip()
-            if md:
-                md = _clean_html(md)
-                # 斜体误判上标还原（DALK 实测 ⁱⁿⁱtⁱal/ⁿode/post⁻processⁱⁿg）
-                md = _fix_italic_superscripts(md)
-                # 伪标题降级：大字号强调句被误判成标题会巨字渲染+翻译劣化。
-                # 页 0 首个标题是论文标题的位置证据，豁免长标题降级
-                # （DALK/FG-RAG 标题丢失根治，2026-09-12）
-                md = _demote_sentence_headings(md, protect_first=(pno == 0))
-                # 跨栏粘连段拆分：单位行+行中 Abstract 标题+右栏片段合成一段
-                md = _split_glued_columns(md)
-                if image_dir:
-                    md = _normalize_image_refs(md, image_dir)
-                    # 先锚定插图（此时 markdown 仍是页面 y 带顺序），再列重排。
-                    # v2 几何配对：用 caption 块坐标就近匹配快照区域，
-                    # 序号配对在两栏页上会把图配错 caption（DALK p7 实测）
-                    md = _insert_figures(
-                        md, refs, snap_regions=snap_regions, raw_blocks=raw_blocks
-                    )
-                # 列重排：图片引用段跟随其 caption 同进同退
-                md = _column_reading_order(raw_blocks, md)
+            md = extract_page_md(doc, file_path, pno, image_dir, refs, snap_regions)
             # 有快照的页即使文字变短也算有效文本层（文字进了图，不回退 OCR）
             out.append(md if (len(md) >= MIN_TEXT_CHARS or refs) else None)
         return out

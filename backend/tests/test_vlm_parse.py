@@ -213,3 +213,80 @@ def test_parse_page_mask_regions_forwarded(tmp_path):
     ), patch("ocr.vlm_parse._render_png", side_effect=fake_render):
         asyncio.run(vlm_parse.parse_page(pdf, 0, _CFG, mask_regions=regions))
     assert seen == [regions, regions, regions]
+
+
+# ── 快照/truth 协同（阶段12-T2）──────────────────────────────────────
+
+
+def _make_figure_pdf(path) -> None:
+    """正文段 + 栅格图（内含标签文字）+ 图注的页面。"""
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_textbox(
+        pymupdf.Rect(50, 60, 545, 110),
+        "Body text paragraph that lives outside any figure region.",
+    )
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 50, 36))
+    png = pix.tobytes("png")
+    page.insert_image(pymupdf.Rect(170, 130, 420, 310), stream=png)
+    # 图内标签：块主体落在图片区域内（redact/truth 扣除的对象）
+    page.insert_textbox(
+        pymupdf.Rect(180, 140, 410, 160), "Label Inside Figure"
+    )
+    page.insert_textbox(
+        pymupdf.Rect(170, 320, 420, 345), "Figure 1: A test figure caption."
+    )
+    doc.save(path)
+    doc.close()
+
+
+def test_prepare_truth_excludes_figure_text(tmp_path):
+    """truth 含正文与图注、不含图内标签；refs/regions 就位。"""
+    pdf = str(tmp_path / "fig.pdf")
+    _make_figure_pdf(pdf)
+    prep = vlm_parse._prepare(pdf, 0, str(tmp_path / "imgs"))
+    assert prep["scanned"] is False
+    assert len(prep["refs"]) == 1
+    assert len(prep["regions"]) == 1
+    assert "Body text paragraph" in prep["truth"]
+    assert "Figure 1: A test figure caption" in prep["truth"]  # 图注豁免
+    assert "Label Inside Figure" not in prep["truth"]
+
+
+def test_prepare_scanned_classification(tmp_path):
+    """无文本无快照 = 扫描页；短文本但有快照 = 数字页（同 extract_pages 口径）。"""
+    blank = str(tmp_path / "blank.pdf")
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.save(blank)
+    doc.close()
+    assert vlm_parse._prepare(blank, 0, None)["scanned"] is True
+
+    fig_only = str(tmp_path / "fig_only.pdf")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 50, 36))
+    page.insert_image(pymupdf.Rect(170, 130, 420, 310), stream=pix.tobytes("png"))
+    page.insert_textbox(
+        pymupdf.Rect(170, 320, 420, 345), "Figure 1: caption only."
+    )
+    doc.save(fig_only)
+    doc.close()
+    prep = vlm_parse._prepare(fig_only, 0, str(tmp_path / "imgs2"))
+    assert prep["scanned"] is False  # 有快照 → 数字页（文字进图）
+    assert prep["refs"]
+
+
+def test_finalize_md_inserts_ref_before_caption(tmp_path):
+    """快照引用按 caption 锚定插回 VLM 输出（引用在 caption 段之前）。"""
+    pdf = str(tmp_path / "fig.pdf")
+    _make_figure_pdf(pdf)
+    prep = vlm_parse._prepare(pdf, 0, str(tmp_path / "imgs3"))
+    vlm_md = (
+        "# Test Paper\n\nBody text paragraph that lives outside any figure "
+        "region.\n\nFigure 1: A test figure caption.\n\nTail paragraph."
+    )
+    out = vlm_parse._finalize_md(prep, vlm_md)
+    assert out.count("![Figure](") == 1
+    assert out.index("![Figure](") < out.index("Figure 1: A test figure caption.")
+    assert "Tail paragraph." in out
