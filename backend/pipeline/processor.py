@@ -668,8 +668,11 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
             t_cfg["doc_title"] = doc_title
 
         # 先收集所有需要翻译的 block（跳过空白、纯图片与已缓存的）
-        pending: list[tuple] = []  # (page, block, cache_key)
+        # 元组第 4 位 = 该块所处的当前小节标题（阶段12-T6：注入系统
+        # 提示词做术语消歧的近端语境，随块顺序滚动更新）
+        pending: list[tuple] = []  # (page, block, cache_key, section)
         fig_jobs: list[tuple] = []  # (block, cache_key, Task)——译制图与文本块并发
+        cur_section = ""
         for page in pages:
             for block in page["blocks"]:
                 original = (block.get("original") or "").strip()
@@ -681,6 +684,8 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                 if not original:
                     block["translated"] = ""
                     continue
+                if original.startswith("#"):
+                    cur_section = original.lstrip("#").strip()[:80]
                 if _PURE_IMAGE.match(original):
                     # 图表块：译文=原图（图表不做翻译）。
                     # 译制图功能默认关闭（FIGURE_TRANSLATION_ENABLED），开启时
@@ -757,7 +762,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                     stats["tr_cache_hit"] += 1
                     stats["tr_total"] += 1
                 else:
-                    pending.append((page, block, key))
+                    pending.append((page, block, key, cur_section))
                     stats["tr_total"] += 1
 
         total = max(len(pending), 1)
@@ -771,7 +776,13 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
         async def _translate_chunk(chunk: list[tuple], advance: bool = True):
             nonlocal done
             async with sem:
-                texts = [b["original"] for _, b, _ in chunk]
+                texts = [b["original"] for _, b, _, _ in chunk]
+                # 小节语境注入（阶段12-T6）：取块组内最靠后的非空小节
+                # （最接近本批结尾的阅读位置）；浅拷贝配置避免并发污染
+                section = next(
+                    (s for _, _, _, s in reversed(chunk) if s), ""
+                )
+                cfg = dict(t_cfg, section=section) if section else t_cfg
                 # 公式保护（阶段2-T5）：LaTeX 定界式 + 数学碎片 token 占位后
                 # 送翻（正文照常翻译），译文回来再原样还原
                 protected = [sanitize.protect_formulas(t) for t in texts]
@@ -780,7 +791,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                         [p for p, _ in protected],
                         source_lang,
                         target_lang,
-                        t_cfg,
+                        cfg,
                     )
                     if len(outs) != len(texts):
                         raise ValueError(
@@ -793,13 +804,13 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                         try:
                             outs.append(
                                 await translate_text(
-                                    p, source_lang, target_lang, t_cfg
+                                    p, source_lang, target_lang, cfg
                                 )
                             )
                         except Exception as e:
                             print(f"[translate] 单段翻译失败: {e}")
                             outs.append("")
-                for (_, block, key), (p, restore), translated in zip(
+                for (_, block, key, _s), (p, restore), translated in zip(
                     chunk, protected, outs
                 ):
                     block["translated"] = sanitize.strip_stray_emphasis(
@@ -859,11 +870,11 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
             )
 
         retry = [
-            (page, block, key)
-            for page, block, key in pending
+            (page, block, key, section)
+            for page, block, key, section in pending
             if _needs_retry(block)
         ]
-        for _, block, _ in retry:
+        for _, block, _, _ in retry:
             orig = block.get("original") or ""
             trans = block.get("translated") or ""
             if sanitize.is_echo(orig, trans, target_lang) or sanitize.is_fused_translation(orig, trans):
@@ -884,7 +895,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
             # 补翻后仍是回声（参考文献等模型必然原样照抄的内容，重试也无解）：
             # 清空译文保持"待翻译"状态——比拿英文原文冒充译文更诚实，
             # 用户可用段落级手动翻译按钮重试
-            for _, block, _ in retry:
+            for _, block, _, _ in retry:
                 if sanitize.is_echo(
                     block.get("original") or "",
                     block.get("translated") or "",

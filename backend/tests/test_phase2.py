@@ -10,7 +10,6 @@ from pipeline.processor import _merge_cross_page, _single_block
 from translate.providers.openai_compat import (
     PROMPT_VERSION,
     OpenAICompatProvider,
-    parse_segments,
 )
 from translate.sanitize import (
     is_formula_block,
@@ -248,20 +247,8 @@ def test_prompt_echo_normal_text_untouched():
     assert strip_prompt_echo(t, "**some title**") == t
 
 
-# ── openai_compat.parse_segments ─────────────────────────────────────
-
-
-def test_parse_segments_full():
-    out = "<<<0>>>\n你好\n<<<1>>>\n世界\n<<<2>>>\n结束"
-    parsed = parse_segments(out, 3)
-    assert parsed == {0: "你好", 1: "世界", 2: "结束"}
-
-
-def test_parse_segments_prefix_fallback():
-    # 模型没回显 <<<0>>> 标记时，前缀当作第 0 段
-    parsed = parse_segments("你好\n<<<1>>>\n世界", 2)
-    assert parsed[0] == "你好"
-    assert parsed[1] == "世界"
+# ── openai_compat 批量协议（阶段12-T6 起 JSON 数组；解析用例见
+#    test_providers.py，此处保留传输层失败路径）────────────────────────
 
 
 # ── finish_reason=length → 减半重试（阶段2-T1）───────────────────────

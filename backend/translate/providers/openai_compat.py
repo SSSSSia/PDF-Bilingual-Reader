@@ -1,3 +1,4 @@
+import json
 import re
 
 import httpx
@@ -20,7 +21,12 @@ from .base import BaseTranslator
 #     碰巧自觉回显，Qwen3-8B 遇语义连续的论文段落会把整批当一篇文档连译、
 #     一个标记都不回显（DALK 实测复现），导致全部批次"段数不匹配"减半
 #     到单段——速度退化回逐段且日志爆炸。
-PROMPT_VERSION = "pv5"
+# v6（2026-09-14 阶段12-T6）：分隔标记批量退役，改 JSON 数组结构化 I/O
+#     （生产级做法，BabelDOC/沉浸式翻译同款）：输入 [{"id":n,"text":...}]
+#     要求输出同长度数组，id 对齐使缺段可定位——缺段/段融合仅出错段逐段
+#     重发（替代减半）；temperature 0.2→0（确定性+缓存友好）；系统提示词
+#     注入当前小节标题、术语表按本批命中过滤（替代全表 30 条注入）。
+PROMPT_VERSION = "pv6"
 
 # 语言代码 -> 自然语言名称。旧实现把 "zh"/"en" 代码直接拼进中文提示词
 # （"翻译为zh"），模型理解偏差导致质量差（实测问题），故显式映射。
@@ -49,6 +55,11 @@ def _system_prompt(source_lang: str, target_lang: str, config: dict | None = Non
     title = (config or {}).get("doc_title")
     if title:
         parts.append(f"论文标题：{title}")
+    # 当前小节（阶段12-T6）：术语消歧的最强近端语境（"当前小节：3.2
+    # Scaled Dot-Product Attention" 直接决定 attention 一词的译法域）
+    section = (config or {}).get("section")
+    if section:
+        parts.append(f"当前小节：{section}")
     body = (
         f"你是一位专业的学术文献翻译助手。请将以下{src}内容准确地翻译为{tgt}。"
         "要求："
@@ -57,21 +68,24 @@ def _system_prompt(source_lang: str, target_lang: str, config: dict | None = Non
         "标记符号本身保持原样不翻译；"
         "3) 文本中形如 [[M0]]、[[F1]] 的双方括号占位符是数学公式或符号，"
         "必须原样保留，不要翻译、改写、增删或移动；"
-        "4) 用户消息中单独成行的 <<<0>>>、<<<1>>> 等标记是段落分隔标记："
-        "必须在译文中原样保留每个标记（单独成行、数字不变），"
-        "标记的下一行紧跟该标记下方段落的译文；"
-        "不得合并段落、拆分段落、增删标记，也不要在标记行输出其他内容；"
+        "4) 当用户消息是 JSON 数组（每项 {\"id\": 数字, \"text\": 原文}）时："
+        "输出一个与输入逐项对应的合法 JSON 数组，每项形如 "
+        "{\"id\": 原id, \"translation\": 译文}；"
+        "不得合并、拆分、增删条目或改写 id；"
+        "只输出 JSON 本身，不要代码块围栏、解释或任何前后缀；"
         "5) 参考文献条目、作者与单位信息、图表标题（Table 5: ... 等）"
         "也必须翻译：人名保留原文，论文标题和机构名译成中文；"
         "6) 必须输出译文——绝对不要原样返回原文，哪怕内容是列表、"
         "条目或残缺文本；"
-        "7) 本提示词开头的「论文标题」和「术语表」仅为主题语境，"
+        "7) 本提示词开头的「论文标题」「当前小节」和「术语表」仅为主题语境，"
         "绝不要把它们复述、照抄或加标签写进译文；"
         "8) 只输出译文正文，不要输出任何解释、注释或前后缀。"
     )
     parts.append(body)
     glossary = (config or {}).get("glossary")
     if isinstance(glossary, dict) and glossary:
+        # 命中过滤由 _translate_chunk 完成（本批文本中出现的条目才注入，
+        # 阶段12-T6：全表 30 条注入稀释注意力且诱发复述）
         lines = [
             f"- {k} → {v}"
             for k, v in list(glossary.items())[:_GLOSSARY_MAX]
@@ -82,26 +96,50 @@ def _system_prompt(source_lang: str, target_lang: str, config: dict | None = Non
 
 # ── 批量合并翻译（修复"翻译速度极慢"）────────────────────────────────
 # 逐块单发时，一篇论文上百个段落 = 上百次 HTTP 请求，串行排队极慢。
-# 将多个段落合并为一次请求（分隔标记 <<<n>>>），请求数减少约 6 倍。
-# 模型解析失败或段数不匹配时，自动减半重试（阶段2-T1：10→5→2→1），
-# 单段仍失败才落空并记日志——旧实现直接串行回退，慢且无感知。
+# 将多个段落合并为一次请求（JSON 数组结构化 I/O，阶段12-T6），请求数
+# 减少约 6 倍。id 对齐使缺段可精确定位：缺段/段融合仅出错段逐段重发
+# （BabelDOC 同款回退）；HTTP/截断等传输层失败仍减半重试（小批次输出
+# 更短，可解 finish_reason=length）。
 CHUNK_SIZE = 10
-_SEG_SPLIT = re.compile(r"<<<(\d+)>>>")
 
 
-def parse_segments(out: str, expected: int) -> dict[int, str]:
-    """解析合并翻译输出，返回 {段索引: 译文}。缺段时由调用方判定失败。"""
-    segs = _SEG_SPLIT.split(out)
-    # segs 形如 [前缀(空), idx, 文本, idx, 文本, ...]
+_JSON_FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
+
+
+def _parse_json_array(out: str) -> dict[int, str]:
+    """解析模型输出的 JSON 数组，返回 {id: 译文}。
+
+    宽容策略（弱模型现实）：剥代码围栏；整体 loads 失败时截取首个 '['
+    到最后一个 ']' 再试；条目缺 translation 字段或 id 非法 → 该段视为
+    缺失（调用方逐段重发），不整体报废。"""
+    s = (out or "").strip()
+    m = _JSON_FENCE.search(s)
+    if m:
+        s = m.group(1).strip()
+    try:
+        arr = json.loads(s)
+    except ValueError:
+        i, j = s.find("["), s.rfind("]")
+        if i < 0 or j <= i:
+            raise ValueError("输出不是 JSON 数组")
+        arr = json.loads(s[i : j + 1])
+    if not isinstance(arr, list):
+        raise ValueError("输出不是 JSON 数组")
     parsed: dict[int, str] = {}
-    for j in range(1, len(segs) - 1, 2):
-        try:
-            parsed[int(segs[j])] = segs[j + 1].strip()
-        except ValueError:
+    for item in arr:
+        if not isinstance(item, dict):
             continue
-    # 第 0 段可能紧跟前缀（模型没回显 <<<0>>> 标记）
-    if 0 not in parsed and segs and segs[0].strip():
-        parsed[0] = segs[0].strip()
+        try:
+            idx = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        text = item.get("translation")
+        if not isinstance(text, str):
+            text = item.get("text")  # 模型偶发沿用输入键名
+        if isinstance(text, str) and text.strip():
+            parsed[idx] = text.strip()
+    if not parsed:
+        raise ValueError("JSON 数组无有效条目")
     return parsed
 
 
@@ -149,7 +187,10 @@ class OpenAICompatProvider(BaseTranslator):
                 {"role": "user", "content": text},
             ],
             "max_tokens": 8192,
-            "temperature": 0.2,
+            # 阶段12-T6：0.2→0。翻译是输出高度受限的任务，确定性采样
+            # 是生产标配（BabelDOC 同款）：同文同译、缓存命中稳定、
+            # 弱模型上减少随机发挥；温度带来的"多样性"对翻译是噪声。
+            "temperature": 0,
         }
         # Qwen3 系列是混合思考模型：默认先思考再翻译（实测 22.5s vs 2.3s，慢 10 倍），
         # 且思考内容消耗同一 max_tokens 预算。翻译任务关闭思考。
@@ -193,40 +234,72 @@ class OpenAICompatProvider(BaseTranslator):
     async def _translate_chunk(
         self, chunk: list, source_lang: str, target_lang: str, config: dict
     ) -> list[str]:
-        """翻译一个 chunk。失败时减半重试（阶段2-T1），单段失败才落空。"""
+        """翻译一个 chunk（JSON 数组协议，阶段12-T6）。
+
+        - 术语表按本批命中过滤（全表注入稀释注意力且诱发复述）；
+        - 缺段/段融合 → 仅出错段逐段重发（BabelDOC 同款，id 对齐使
+          缺段可精确定位——比分担减半省请求，也避免好段被重译抖动）；
+        - HTTP/截断等传输层异常 → 减半重试（小批次输出更短，可解
+          finish_reason=length），单段失败落空记日志。"""
+        cfg = config
+        glossary = config.get("glossary")
+        if isinstance(glossary, dict) and glossary:
+            probe = "\n".join(chunk)
+            hit = {k: v for k, v in glossary.items() if k in probe}
+            if len(hit) < len(glossary):
+                cfg = dict(config, glossary=hit)  # 拷贝，不污染全局配置
+
         if len(chunk) == 1:
             try:
-                return [await self.translate(chunk[0], source_lang, target_lang, config)]
+                return [await self.translate(chunk[0], source_lang, target_lang, cfg)]
             except Exception as e:
                 print(f"[translate] 单段翻译失败: {e}")
                 return [""]
 
-        merged = "\n".join(f"<<<{i}>>>\n{t}" for i, t in enumerate(chunk))
-        # 批次协议双保险（2026-09-08）：系统提示词已有规则 4，此处再在
-        # 用户消息顶部重复一次——模型对近端指令更敏感（Qwen3-8B 连译
-        # 实测：无协议说明时整批连译、标记全丢，减半到单段也然）
+        payload = json.dumps(
+            [{"id": i, "text": t} for i, t in enumerate(chunk)],
+            ensure_ascii=False,
+        )
         merged = (
-            f"以下内容包含 {len(chunk)} 个待翻译段落，每段以单独一行的"
-            " <<<数字>>> 分隔标记开头，翻译后请保留全部标记：\n\n" + merged
+            f"以下 JSON 数组包含 {len(chunk)} 个待翻译段落。"
+            f"请输出同长度的 JSON 数组，每项 {{\"id\": 原id, \"translation\": 译文}}，"
+            f"id 逐项对应，不得合并、拆分、增删条目，不要输出 JSON 以外的"
+            f"任何内容：\n\n{payload}"
         )
         try:
-            out = await self.translate(merged, source_lang, target_lang, config)
-            parsed = parse_segments(out, len(chunk))
-            if all(i in parsed for i in range(len(chunk))):
-                # 段融合检测（HippoRAG 实测：模型把整批译文塞进 <<<0>>>，
-                # 标题块译文带着摘要/引言/方法全文，段数校验却通过）——
-                # 命中即减半重试，最终落到单段不再可能融合
-                if any(
-                    is_fused_translation(chunk[i], parsed[i])
-                    for i in range(len(chunk))
-                ):
-                    raise ValueError("疑似段融合（单段译文多段落膨胀）")
+            out = await self.translate(merged, source_lang, target_lang, cfg)
+            parsed = _parse_json_array(out)
+            failed = [
+                i
+                for i, t in enumerate(chunk)
+                if i not in parsed or is_fused_translation(t, parsed[i])
+            ]
+            if not failed:
                 return [parsed[i] for i in range(len(chunk))]
-            raise ValueError("段数不匹配")
+            # 仅出错段逐段重发（好段直接采用，绝不再发）
+            print(
+                f"[translate] JSON 批次 {len(failed)}/{len(chunk)} 段缺失/融合，"
+                f"逐段重发: ids={failed}"
+            )
+            results = [parsed.get(i, "") for i in range(len(chunk))]
+            for i in failed:
+                try:
+                    results[i] = await self.translate(
+                        chunk[i], source_lang, target_lang, cfg
+                    )
+                except Exception as e:
+                    print(f"[translate] 单段翻译失败 id={i}: {e}")
+                    results[i] = ""
+            return results
         except Exception as e:
-            # 减半重试：宁可多几次请求，也不串行慢速回退或丢段
+            # 传输层失败（HTTP/截断/非 JSON 整体输出）→ 减半重试：
+            # 小批次输出更短，可解 finish_reason=length；非 JSON 输出
+            # 减半后仍非 JSON 会一路退化到单段（无 JSON 包裹，最稳）。
             half = len(chunk) // 2
-            print(f"[translate] 批次截断/失败，减半重试 chunk={len(chunk)}→{half}+{len(chunk) - half}: {e}")
+            print(
+                f"[translate] 批次失败，减半重试 chunk={len(chunk)}→"
+                f"{half}+{len(chunk) - half}: {e}"
+            )
             first = await self._translate_chunk(
                 chunk[:half], source_lang, target_lang, config
             )
