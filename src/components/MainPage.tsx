@@ -224,7 +224,7 @@ export default function MainPage() {
     if (sessions.getByKey(doc.doc_id)) {
       sessions.activate(doc.doc_id);
       navigatedRef.current = true;
-      navigate("/reader/bilingual");
+      navigate(mode === "inline" ? "/reader/inline" : "/reader/bilingual");
       return;
     }
     setOpeningId(doc.doc_id);
@@ -286,7 +286,7 @@ export default function MainPage() {
         },
       });
       navigatedRef.current = true; // 直接导航，避免 pages effect 重复跳转
-      navigate("/reader/bilingual");
+      navigate(mode === "inline" ? "/reader/inline" : "/reader/bilingual");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // 提取缓存失效且源文件路径在：给一键重提取入口，点卡片不再死路
@@ -532,7 +532,7 @@ export default function MainPage() {
                 title={
                   d.file_exists === false
                     ? "源 PDF 已移动/删除：对照与紧跟模式可用，原版模式不可用"
-                    : "打开已翻译内容（秒开，不重新翻译）"
+                    : "打开已翻译文件"
                 }
                 className={`card h-full cursor-pointer p-3 transition-colors duration-150 hover:border-slate-400 dark:hover:border-slate-500 ${
                   openingId ? "cursor-wait opacity-60" : ""
@@ -782,7 +782,7 @@ export default function MainPage() {
           setAttachPrompt(null);
           if (r.ok && ready) {
             navigatedRef.current = true;
-            navigate("/reader/bilingual");
+            navigate(mode === "inline" ? "/reader/inline" : "/reader/bilingual");
           }
         }}
         onCancel={() => {

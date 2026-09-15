@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { usePdfStore } from "../../stores/pdfStore";
 import { useSessionsStore } from "../../stores/sessionsStore";
+import { useUiStore } from "../../stores/uiStore";
 import { EXTRACT_DONE, currentTranslationKey } from "../../lib/translationManager";
 
 /**
@@ -74,7 +75,12 @@ export default function TitleBar() {
       if (!isReader) activate(key);
       return;
     }
-    if (activate(key) && !isReader) navigate("/reader/bilingual");
+    if (activate(key) && !isReader) {
+      // 阅读模式跟随用户上次的对照/紧跟选择（与重开入口统一口径，
+      // 否则页面是左右对照而工具栏选中态还停在紧跟模式）
+      const mode = useUiStore.getState().mode;
+      navigate(mode === "inline" ? "/reader/inline" : "/reader/bilingual");
+    }
   };
 
   const handleClose = (key: string, running: boolean) => {
