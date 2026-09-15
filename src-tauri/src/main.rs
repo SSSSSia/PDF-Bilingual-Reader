@@ -39,6 +39,7 @@ fn main() {
             commands::check_file_exists,
             commands::get_cache_dir,
             commands::export_content,
+            commands::export_copy_file,
             commands::test_api_connection,
         ])
         .setup(|_app| {

@@ -215,3 +215,15 @@ pub async fn export_content(
     fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// 把缓存里的成品文件（BabelDOC 双语 PDF 等二进制产物）复制到用户所选
+/// 路径（2026-09-15 T10 导出收敛：Markdown 译文 + 原版对照 PDF 两种）。
+/// export_content 只收字符串写不了二进制；fs 插件未引入，经 Rust 落盘。
+#[tauri::command]
+pub async fn export_copy_file(
+    _state: State<'_, AppState>,
+    src: String,
+    dst: String,
+) -> Result<(), String> {
+    fs::copy(&src, &dst).map(|_| ()).map_err(|e| e.to_string())
+}
