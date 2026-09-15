@@ -170,8 +170,11 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
     if not api_url or not api_key or not model:
         raise ValueError("API 配置不完整（api_url / api_key / model），请先在设置中完成配置")
 
-    venv_python = venv_python(os.path.dirname(os.path.abspath(cache_dir)))
-    if not venv_python:
+    # 局部变量不得与模块级 venv_python() 同名（同名赋值会把函数内该名字
+    # 整体变为局部变量，RWS 调用即 UnboundLocalError——2026-09-12 T6 重构
+    # 引入，导出启动恒 500，2026-09-15 T10 人工验收首次实测发现）
+    runtime_python = venv_python(os.path.dirname(os.path.abspath(cache_dir)))
+    if not runtime_python:
         raise ValueError(
             "BabelDOC 运行时缺失（正常安装包内自带）——请重新下载完整版安装包"
         )
@@ -250,7 +253,7 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
     log_path = os.path.join(out_dir, "worker.log")
     log_fh = open(log_path, "a", encoding="utf-8")
     cmd = [
-        venv_python,
+        runtime_python,
         _worker_path(),
         "--input", file_path,
         "--output-dir", out_dir,
