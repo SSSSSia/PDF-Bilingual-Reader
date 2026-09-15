@@ -224,7 +224,10 @@ def _promote_titles(md: str, layout_titles: list) -> str:
 # 时才 bump 版本后缀。
 # v2（阶段12-T9.2）：送 VLM 前遮罩扩展到 abandon 区域（版权/页眉不再
 # 进入解析视野），旧缓存是未遮罩产物，需整体失效重解析。
-VLM_PARSE_MODEL = "vlm-parse-v2"
+# v3（阶段12-T10 反馈 2）：快照区域受版面模型 plain text 区域仲裁——
+# prompt 示例框不再遮罩/扣除，旧缓存缺这部分内容且 bag 失败后原始缓存
+# 不会被重取（只在通过校验时落盘），必须整体失效重解析。
+VLM_PARSE_MODEL = "vlm-parse-v3"
 
 # 并发上限：与扫描页视觉通道共用免费档保守值
 CONCURRENCY = siliconflow.OCR_CONCURRENCY
@@ -431,6 +434,7 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
                 image_dir,
                 extra_regions=lr["fig"],
                 table_regions=lr["table"],
+                text_regions=lr["text"],
             )
             if image_dir
             else ([], [])

@@ -181,6 +181,11 @@ _MIN_FIG_RATIO = 0.015     # 面积占页面比例下限（过滤图标/装饰�
 _MAX_FIG_RATIO = 0.92      # 上限（过滤整页背景）
 _MAX_FIG_TEXT_CHARS = 2000 # 区域内文本字符上限（兜底：防整页文本框误判；
                            # 矢量图表的轴标签/图例是真实文本，实测可达 1500+）
+_FIG_TEXT_COVER_MIN = 0.5  # 版面仲裁（T10 反馈 2）：区域内文本被模型 plain
+                           # text 区域覆盖 ≥ 此比例判文本框，快照否决——
+                           # 实测全语料真图真表 ≤14%、prompt 示例框 ≥60%，
+                           # 0.5 落在空档中点（SubgraphRAG p5 实测 0.596）
+_FIG_TEXT_COVER_CHARS = 200  # 仲裁参评的区域内文本下限（小区域覆盖噪声大）
 _FIG_SCALE = 2.5           # 快照渲染倍率（与视觉 OCR 一致）
 _MERGE_GAP = 12.0          # 区域合并空隙容差（pt）：图表内文字行把绘图簇
                            # 隔开 0~10pt，只并相交矩形会把一张图拆成多条横带
@@ -416,7 +421,12 @@ def _merge_rects(rects: list, gap: float = 0.0) -> list:
     return rects
 
 
-def _figure_regions(page, debug: bool = False, extra_regions: list | None = None) -> list:
+def _figure_regions(
+    page,
+    debug: bool = False,
+    extra_regions: list | None = None,
+    text_regions: list | None = None,
+) -> list:
     """检测页面的图/表区域（栅格图 + 矢量绘图簇 + 表格统一处理）。
 
     表格也按图片快照（2026-09-06 用户决策：文本表格转 markdown 必错位；
@@ -427,10 +437,22 @@ def _figure_regions(page, debug: bool = False, extra_regions: list | None = None
     无框表 find_tables 检不出，靠模型区域补位；与既有候选重叠时由
     _merge_rects 的空隙合并天然去重。
 
+    text_regions（阶段12-T10 反馈 2）：版面模型 plain text 区域，作为最终
+    区域的仲裁信号——带边框的文本示例框（ICLR 附录 prompt 案例框，
+    SubgraphRAG p22-29 / DALK p17-18 实测）的矢量矩形会被 cluster_drawings
+    （有时连模型自己也低置信误判 figure/table，SubgraphRAG p5）当图表，
+    快照会吞掉整块正文（truth 扣空 → 交叉校验失明、遮罩搅乱 VLM、降级
+    路径 redact 挖空文本层）。仲裁口径 = 区域内文本字符被 plain text
+    区域覆盖的比例（块主体 ≥50% 在区域内即计入）——模型检测碎片化的
+    附录页上矩形并集盖不满框内留白，字符覆盖才是内容口径。实测全语料
+    分离度：真图真表 0~14%，prompt 框 60~100%（见 docs/阶段12 §7.4）。
+
     过滤规则：
     - 面积占比 [_MIN_FIG_RATIO, _MAX_FIG_RATIO]；
     - 区域内部文本超 _MAX_FIG_TEXT_CHARS 兜底排除（防整页文本框误判；
-      注意矢量图表轴标签是真实文本，正常图表可达 1500+ 字符）。
+      注意矢量图表轴标签是真实文本，正常图表可达 1500+ 字符）；
+    - text_regions 供仲裁时：内部文本 ≥_FIG_TEXT_COVER_CHARS 且覆盖
+      ≥_FIG_TEXT_COVER_MIN 的区域否决（模型说这是正文）。
     返回按 y0 排序的 Rect 列表。debug=True 时打印各环节计数与跳过原因。"""
     page_area = page.rect.width * page.rect.height
     rects: list = []
@@ -451,6 +473,12 @@ def _figure_regions(page, debug: bool = False, extra_regions: list | None = None
     if extra_regions:
         rects.extend(pymupdf.Rect(r) for r in extra_regions)
     merged = _merge_rects(rects, gap=_MERGE_GAP)
+    # 版面仲裁用的 plain text 区域（一次性预计算；空区域剔除）
+    trs = (
+        [t for t in (pymupdf.Rect(x) for x in text_regions) if not t.is_empty]
+        if text_regions
+        else []
+    )
     if debug:
         print(
             f"[figure] p{page.number + 1}: 候选rect={len(rects)} "
@@ -474,6 +502,23 @@ def _figure_regions(page, debug: bool = False, extra_regions: list | None = None
             if debug:
                 print(f"[figure] p{page.number + 1}: 跳过(文本{text_chars}过密) {r}")
             continue  # 文本过密（整页文本框），兜底排除
+        if text_regions and text_chars >= _FIG_TEXT_COVER_CHARS:
+            covered = 0
+            for b in page.get_text("blocks", clip=r):
+                n = len((b[4] if len(b) > 4 else "").strip())
+                if not n:
+                    continue
+                br = pymupdf.Rect(b[:4])
+                inter = sum((br & t).get_area() for t in trs)
+                if inter >= 0.5 * max(br.get_area(), 1.0):
+                    covered += n
+            if covered >= _FIG_TEXT_COVER_MIN * text_chars:
+                if debug:
+                    print(
+                        f"[figure] p{page.number + 1}: 仲裁否决(正文文本覆盖"
+                        f"{covered / text_chars:.0%}) {r}"
+                    )
+                continue
         figs.append(r)
     figs.sort(key=lambda r: (r.y0, r.x0))
     return figs
@@ -579,6 +624,7 @@ def _snapshot_figures(
     debug: bool = True,
     extra_regions: list | None = None,
     table_regions: list | None = None,
+    text_regions: list | None = None,
 ) -> tuple[list[str], list]:
     """把页面图表区域截图为 PNG，返回 (图片引用列表, 最终区域列表)。
 
@@ -589,7 +635,8 @@ def _snapshot_figures(
     extra_regions/table_regions（阶段12-T9.2）：版面模型的 table/figure 区域
     矩形——前者并入 _figure_regions 候选（无框表补位），后者并入 table_boxes
     参与分类（模型判 table 的区域即使 find_tables 不认也命名 tab_*，
-    译制图按钮的语义才成立）。
+    译制图按钮的语义才成立）。text_regions（T10 反馈 2）：版面模型
+    plain text 区域，仲裁几何候选（见 _figure_regions docstring）。
 
     同时落盘 sidecar JSON（<fig>.json：区域坐标 + 图内逐行文字元数据），
     供译制图叠字使用。
@@ -611,7 +658,11 @@ def _snapshot_figures(
     final_regions: list = []
     pad = 3.0  # 快照外扩（pt）：实测 find_tables/绘图簇 bbox 会裁掉表格右缘
     # 最后一个数字（HippoRAG Table 5 "77.4" 只剩半个 "5"），小外扩零风险
-    for k, r0 in enumerate(_figure_regions(page, debug=debug, extra_regions=extra_regions)):
+    for k, r0 in enumerate(
+        _figure_regions(
+            page, debug=debug, extra_regions=extra_regions, text_regions=text_regions
+        )
+    ):
         r = (r0 + (-pad, -pad, pad, pad)) & page.rect
         # 表头吸收：表格绘图簇从第一条横线开始，表头文本行悬在簇上方
         # （见 _absorb_header_lines docstring），并入区域统一截图+redact
