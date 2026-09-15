@@ -65,3 +65,55 @@ def test_small_text_region_below_floor_survives():
         page, text_regions=[pymupdf.Rect(100, 100, 500, 400)]
     )
     assert len(figs) == 1
+
+
+# ── 注释边界收夹（阶段12-T10 反馈 7，2026-09-15）────────────────────
+
+def _figure_page_with_caption():
+    """页面上部一个矢量图（矩形），下方紧跟 Figure 注释行 + 正文段。"""
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(pymupdf.Rect(100, 80, 500, 300), color=(0, 0, 0), width=1)
+    page.insert_text((110, 320), "Figure 1: The framework overview.", fontsize=10)
+    page.insert_text((110, 345), "This body paragraph follows the caption.", fontsize=10)
+    return page
+
+
+def test_caption_clamp_releases_caption_and_body():
+    """图注被卷进快照 → 底边收到注释上方：注释与其后正文留在文本流
+    （SubgraphRAG p2 实测形态：注释被遮罩 → 图甩页尾、注释未翻译）。"""
+    page = _figure_page_with_caption()
+    figs = _figure_regions(page)
+    assert len(figs) == 1
+    # 注释行（y≈312-322）不再在区域内
+    assert figs[0].y1 < 312, f"底边应收夹到注释上方: {figs[0]}"
+    # 图主体未被误切（矢量矩形到 y=300）
+    assert figs[0].y1 >= 300
+
+
+def test_caption_clamp_guard_protects_model_regions():
+    """守卫：收夹会切断模型 figure/table 区域主体 → 放弃收夹维持现状
+    （DALK p8 跨栏合并大块实测：图注下方还有另一栏的表，切了就丢表）。"""
+    page = _figure_page_with_caption()
+    # 右下角再造一个"模型 table 区域"，横跨注释下沿——收夹会切到它
+    model_tab = pymupdf.Rect(320, 310, 560, 420)
+    figs = _figure_regions(
+        page, extra_regions=[model_tab], caption_regions=[]
+    )
+    # 含模型区域合并后的大区域未被收夹（守卫触发）
+    merged = [r for r in figs if (r & model_tab).get_area() > 0]
+    assert any(r.y1 > 420 - 4 for r in merged), f"守卫应放弃收夹: {merged}"
+
+
+def test_caption_clamp_keyword_block_and_model_caption_equivalent():
+    """关键词注释行（Figure N 开头 ≤45pt 块）与模型 caption 区域等效——
+    模型漏检注释的页由关键词兜底（用户建议的 Figure/Table 关键词方案）。"""
+    page = _figure_page_with_caption()
+    # 不给模型 caption 区域：关键词块兜底同样完成收夹
+    figs = _figure_regions(page, caption_regions=[])
+    assert figs[0].y1 < 312
+    # 给模型 caption 区域：结果一致
+    figs2 = _figure_regions(
+        page, caption_regions=[pymupdf.Rect(105, 312, 400, 324)]
+    )
+    assert abs(figs[0].y1 - figs2[0].y1) < 1

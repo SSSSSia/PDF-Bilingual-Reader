@@ -36,8 +36,10 @@ _jobs: dict[str, dict] = {}
 _PUMP_TASKS: dict[str, asyncio.Task] = {}
 
 _STATUS = ("pending", "running", "done", "error", "cancelled")
-# 阶段11-T2 子集：全局 worker 并发上限（T0 实测单 worker RSS 峰值 ~1.5GB）
-_MAX_WORKERS = 2
+# 全局 worker 并发上限（T0 实测单 worker RSS 峰值 ~1.5GB；原 2 为 T2 裁剪
+# 后保留值）。2026-09-15 用户拍板收到 1：前端单任务模型 + 任务可见性按
+# 「正在生成的那一篇」呈现，同时只跑一篇语义最清晰，内存最稳
+_MAX_WORKERS = 1
 
 
 def list_running_exports() -> list[dict]:

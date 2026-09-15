@@ -426,6 +426,7 @@ def _figure_regions(
     debug: bool = False,
     extra_regions: list | None = None,
     text_regions: list | None = None,
+    caption_regions: list | None = None,
 ) -> list:
     """检测页面的图/表区域（栅格图 + 矢量绘图簇 + 表格统一处理）。
 
@@ -446,6 +447,14 @@ def _figure_regions(
     区域覆盖的比例（块主体 ≥50% 在区域内即计入）——模型检测碎片化的
     附录页上矩形并集盖不满框内留白，字符覆盖才是内容口径。实测全语料
     分离度：真图真表 0~14%，prompt 框 60~100%（见 docs/阶段12 §7.4）。
+
+    caption_regions（阶段12-T10 反馈 7）：版面模型 figure_caption/table_caption
+    区域 + 严格注释行文本块（Figure/Table N 开头、块高 ≤45pt）——注释边界
+    收夹：注释被卷进快照会被遮罩（VLM 看不见 → 输出缺注释 → 快照插回无
+    锚点被甩页尾，SubgraphRAG p2 实测），且注释后的正文跟着被吞。收夹规则
+    = 注释贴近哪条边就把那条边收到注释外沿（图注在下方收底、表注在上方
+    收顶，同侧多条取最保守）；守卫：收夹不得切割模型 figure/table 区域
+    主体，违反即放弃收夹（DALK p8 跨栏合并大块此类，维持现状）。
 
     过滤规则：
     - 面积占比 [_MIN_FIG_RATIO, _MAX_FIG_RATIO]；
@@ -520,8 +529,72 @@ def _figure_regions(
                     )
                 continue
         figs.append(r)
+    figs = _clamp_by_captions(page, figs, extra_regions, caption_regions, debug)
     figs.sort(key=lambda r: (r.y0, r.x0))
     return figs
+
+
+# 注释行文本块的高度上限（≈3 行）：区分真注释与以 Table N 开头的正文段
+_CAPTION_BLOCK_MAX_H = 45.0
+
+
+def _clamp_by_captions(
+    page,
+    figs: list,
+    model_regions: list | None,
+    caption_regions: list | None,
+    debug: bool = False,
+) -> list:
+    """注释边界收夹（T10 反馈 7）：把卷进快照的注释及其后的正文放出
+    遮罩/扣除——注释留在文本流里，快照插回才有锚点、注释后才翻得着。
+
+    边界来源：模型 caption 区域（几何可靠）+ 严格注释行文本块（关键词
+    Figure/Table N 几何化，模型漏检注释的页兜底）。规则：注释与区域横向
+    重叠 ≥50%（同栏）且贴近某条边（在该边 65% 范围内）→ 该边收到注释
+    外沿 2pt；同侧多条注释取最保守（收得最少的）边界。守卫：任一模型
+    figure/table 区域会被切断（主体越出新边界 >4pt）→ 该区域整体放弃
+    收夹（宁可维持现状也不切错）。"""
+    caps = [pymupdf.Rect(r) for r in (caption_regions or []) if not pymupdf.Rect(r).is_empty]
+    for b in page.get_text("blocks"):
+        t = (b[4] if len(b) > 4 else "").strip()
+        r = pymupdf.Rect(b[:4])
+        if t and _FIG_CAPTION_LINE.match(t) and r.height <= _CAPTION_BLOCK_MAX_H:
+            caps.append(r)
+    if not caps or not figs:
+        return figs
+    models = [pymupdf.Rect(r) for r in (model_regions or [])]
+    out = []
+    for r in figs:
+        rw = max(r.width, 1.0)
+        bots, tops = [], []
+        for c in caps:
+            inter = r & c
+            if inter.is_empty or inter.width < 0.5 * min(rw, c.width):
+                continue  # 不同栏
+            if c.y0 >= r.y0 + 0.35 * r.height:
+                bots.append(c.y0)  # 贴底 → 底边收到注释上方
+            if c.y1 <= r.y0 + 0.65 * r.height:
+                tops.append(c.y1)  # 贴顶 → 顶边收到注释下方
+        y1 = min(r.y1, max(bots) - 2) if bots else r.y1
+        y0 = max(r.y0, min(tops) + 2) if tops else r.y0
+        if y1 - y0 <= 0.5 * r.height:
+            continue  # 收得过狠（>50%），异常形态放弃
+        nr = pymupdf.Rect(r.x0, y0, r.x1, y1)
+        # 守卫：与区域重叠 ≥30% 的模型图表区域不得被切断
+        cut = any(
+            (m & r).get_area() >= 0.3 * max(m.get_area(), 1.0)
+            and (m.y1 > y1 + 4 or m.y0 < y0 - 4)
+            for m in models
+        )
+        if cut:
+            if debug:
+                print(f"[figure] p{page.number + 1}: 注释收夹守卫触发（会切模型区域）{r}")
+            out.append(r)
+        else:
+            if nr != r and debug:
+                print(f"[figure] p{page.number + 1}: 注释收夹 {r} -> {nr}")
+            out.append(nr)
+    return out
 
 
 def _figure_inner_text_rects(page, regions: list) -> list:
@@ -625,6 +698,7 @@ def _snapshot_figures(
     extra_regions: list | None = None,
     table_regions: list | None = None,
     text_regions: list | None = None,
+    caption_regions: list | None = None,
 ) -> tuple[list[str], list]:
     """把页面图表区域截图为 PNG，返回 (图片引用列表, 最终区域列表)。
 
@@ -660,7 +734,11 @@ def _snapshot_figures(
     # 最后一个数字（HippoRAG Table 5 "77.4" 只剩半个 "5"），小外扩零风险
     for k, r0 in enumerate(
         _figure_regions(
-            page, debug=debug, extra_regions=extra_regions, text_regions=text_regions
+            page,
+            debug=debug,
+            extra_regions=extra_regions,
+            text_regions=text_regions,
+            caption_regions=caption_regions,
         )
     ):
         r = (r0 + (-pad, -pad, pad, pad)) & page.rect

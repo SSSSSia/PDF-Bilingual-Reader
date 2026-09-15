@@ -32,7 +32,8 @@ def test_split_layout_regions_classifies_and_drops_malformed():
     assert len(lr["title"]) == 1
     assert len(lr["text"]) == 1         # plain text（栏判定兜底信号）
     assert vlm_parse._split_layout_regions(None) == {
-        "fig": [], "table": [], "abandon": [], "title": [], "text": []
+        "fig": [], "table": [], "abandon": [], "title": [], "text": [],
+        "caption": [],
     }
 
 

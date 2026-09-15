@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { usePdfStore } from "../../stores/pdfStore";
 import { useSessionsStore } from "../../stores/sessionsStore";
 import { useUiStore } from "../../stores/uiStore";
+import { useBabelDocStore } from "../../stores/babeldocStore";
 import { EXTRACT_DONE, currentTranslationKey } from "../../lib/translationManager";
 
 /**
@@ -25,6 +26,9 @@ export default function TitleBar() {
   const sessions = useSessionsStore((s) => s.sessions);
   const activate = useSessionsStore((s) => s.activate);
   const closeSession = useSessionsStore((s) => s.close);
+  // BabelDOC 全局进度徽标（T10 反馈 6 改进 1）：任务运行中任何界面可见，
+  // 点击回到该文档的「原版对照」视图看进度——解决「切走后像暂停了」
+  const bdoc = useBabelDocStore();
   const [maximized, setMaximized] = useState(false);
   const [win, setWin] = useState<{
     minimize: () => void;
@@ -87,6 +91,21 @@ export default function TitleBar() {
     if (running) return; // 翻译中不可关闭（同旧页签约定）
     const next = closeSession(key);
     if (next === null) navigate("/");
+  };
+
+  const norm = (p?: string | null) =>
+    (p || "").replace(/[\/]+/g, "/").toLowerCase();
+
+  const jumpToBabeldoc = () => {
+    const target = norm(bdoc.filePath);
+    if (!target) return;
+    const hit = sessions.find((x) => norm(x.snapshot?.filePath) === target);
+    if (!hit) return; // 文档未开阅读会话：徽标仅展示（hover 文案说明）
+    if (activate(hit.key) && !isReader) {
+      const mode = useUiStore.getState().mode;
+      navigate(mode === "inline" ? "/reader/inline" : "/reader/bilingual");
+    }
+    useUiStore.getState().setReaderMode("original_bilingual");
   };
 
   const btn =
@@ -202,6 +221,25 @@ export default function TitleBar() {
         <span className="min-w-0 max-w-[45%] truncate px-1 text-xs text-slate-700 dark:text-slate-200" title={pageTitle}>
           {pageTitle}
         </span>
+      )}
+
+      {/* BabelDOC 生成中：全局进度徽标（跨文档可见，点击跳回该文档对照视图） */}
+      {bdoc.phase === "running" && (
+        <button
+          onClick={jumpToBabeldoc}
+          title={
+            bdoc.filePath
+              ? `正在生成排版对照：${bdoc.filePath.split(/[\/]/).pop() ?? ""}——点击回到该文档查看`
+              : "排版对照生成中"
+          }
+          className="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-medium text-blue-700 transition-colors duration-150 hover:bg-blue-100 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+        >
+          <span
+            className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500"
+            aria-hidden="true"
+          />
+          对照生成中 {Math.round(bdoc.progress)}%
+        </button>
       )}
 
       {/* 拖拽空白区 */}

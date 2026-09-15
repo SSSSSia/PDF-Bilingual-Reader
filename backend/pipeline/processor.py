@@ -77,7 +77,14 @@ MAX_CONCURRENCY = 8
 # 一块的首页判得出双栏），DALK 首页标题/引言乱序根治；②快照区域版面仲裁
 # ——prompt 示例框（SubgraphRAG p22-29/DALK p17-18 实测）不再被误判图表
 # 快照吞掉正文。翻译缓存按 text_hash 键控，未变化文本免重译
-TEXT_LAYER_MODEL = "text-layer-v21"
+# v21→v22（2026-09-15 阶段12-T10 反馈 5/7，未部署前合并生效）：①交叉校验
+# F1→查全率/精确率双阈值（数学页 LaTeX 命令字母膨胀不再误杀——SubgraphRAG
+# p4 公式页 F1 0.895 被拒而查全率 0.9994，实测 29 页分布校准）+ 退化输出
+# （只回页码）一次性重试；②快照注释边界收夹——被卷进快照的 Figure/Table
+# 注释及其后正文放回文本流（SubgraphRAG p2 图1 实测：注释被遮罩致图甩
+# 页尾/注释未译），守卫保证不切割模型图表区域（DALK p8 维持现状）；
+# 受影响页产物变化，旧缓存失效重建
+TEXT_LAYER_MODEL = "text-layer-v22"
 
 # 视觉 OCR 缓存版本后缀。v2：OCR 结果顶部插入整页快照（扫描页图片/表格可见），
 # 旧缓存无快照需失效——会使扫描页重跑一次视觉 OCR（产生一次 API 调用）。
@@ -510,6 +517,7 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
 
     vlm_cfg = config.get("vlm") or {}
     vlm_enabled = vlm_cfg.get("enabled", True) and bool(config.get("api_key"))
+    # 配置键沿用 bag_threshold（历史名），语义=交叉校验查全率阈值（T10 反馈 5）
     bag_threshold = float(vlm_cfg.get("bag_threshold", 0.90))
     sem = asyncio.Semaphore(vlm_parse.CONCURRENCY)
     pending: dict[int, asyncio.Task] = {}
@@ -584,7 +592,7 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
                 image_dir,
                 config,
                 cache_dir,
-                bag_threshold=bag_threshold,
+                recall_threshold=bag_threshold,
                 sem=sem,
                 layout=layout,
             )

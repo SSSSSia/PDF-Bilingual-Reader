@@ -202,31 +202,64 @@ export default function DualPdfPage() {
 
   if (!dualPath) {
     // idle：显式确认后才启动（2026-09-11 用户反馈：不要一点模式就自动跑 BabelDOC）。
-    // 别的文档对照任务进行中时暂禁启动：两个 BabelDOC worker 并发 ~3.6GB
-    // （单 worker RSS 峰值 1.8GB 实测），与 2026-09-11 内存耗尽崩溃同源
+    // 别的文档对照任务进行中：排队卡显示该任务的真实进度（T10 反馈 6
+    // 改进 2——静态文案读起来像「暂停」，实际在跑且看得到）；同时只运行
+    // 一个生成任务（worker 并发 1，内存守卫）
     const busyElsewhere = bdoc.phase === "running" && !mine;
+    const busyName = (bdoc.filePath || "").split(/[\\/]/).pop() || "";
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 text-center dark:border-slate-700 dark:bg-slate-800">
-          <p className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-            生成排版对照？
-          </p>
-          <p className="mb-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-            将启动 BabelDOC 独立管线，对整篇 PDF 重新解析并翻译：首跑约数分钟、
-            消耗模型额度（无法复用现有翻译缓存）；同文档生成过一次后秒开。
-            {busyElsewhere
-              ? "另一篇文档的对照生成正在进行，完成后才能开始本篇（避免双 worker 内存争抢）。"
-              : ""}
-          </p>
-          <div className="flex justify-center">
-            <button
-              className="btn-primary"
-              disabled={busyElsewhere}
-              onClick={() => void bdoc.start(docPath)}
-            >
-              {busyElsewhere ? "等待另一篇生成完成" : "开始生成"}
-            </button>
-          </div>
+          {busyElsewhere ? (
+            <>
+              <p className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                另一篇文档的排版对照正在生成
+              </p>
+              <p
+                className="mb-4 truncate text-xs text-slate-500 dark:text-slate-400"
+                title={busyName}
+              >
+                {busyName} · {Math.round(bdoc.progress)}%
+              </p>
+              <div
+                role="progressbar"
+                aria-valuenow={Math.round(bdoc.progress)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="mb-4 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700"
+                style={{ height: 6 }}
+              >
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                  style={{
+                    width: `${Math.max(2, Math.round(bdoc.progress))}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs leading-relaxed text-slate-400 dark:text-slate-500">
+                完成后即可开始本篇（同时只运行一个生成任务，避免内存争抢）。
+                可点击标题栏的「对照生成中」回到那篇查看。
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                生成排版对照？
+              </p>
+              <p className="mb-4 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                将启动 BabelDOC 独立管线，对整篇 PDF 重新解析并翻译：首跑约数分钟、
+                消耗模型额度（无法复用现有翻译缓存）；同文档生成过一次后秒开。
+              </p>
+              <div className="flex justify-center">
+                <button
+                  className="btn-primary"
+                  onClick={() => void bdoc.start(docPath)}
+                >
+                  开始生成
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

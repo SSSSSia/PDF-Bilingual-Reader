@@ -17,7 +17,8 @@
   T9.2 起遮罩扩展到版面模型 abandon 区域（版权/页眉/venue 佐料
   不进解析视野），truth 同步扣除，输出段落再按区域文本兜底剔除。
 
-防幻觉兜底（交叉校验降级，T3）与快照插回（T2）在 parse_page_verified。
+防幻觉兜底（交叉校验降级，T3；查全率/精确率双阈值，T10 反馈 5）与
+快照插回（T2）在 parse_page_verified。
 缓存：原始解析结果存 ocr_key(pdf_hash, page, VLM_PARSE_MODEL)——T5 调参
 与回归重放时直接命中，免重打 API。
 """
@@ -62,6 +63,7 @@ _FIG_LABELS = {"figure", "table"}
 _ABANDON_LABEL = "abandon"
 _TITLE_LABEL = "title"
 _TEXT_LABEL = "plain text"
+_CAPTION_LABELS = {"figure_caption", "table_caption"}
 
 # 标题编号前缀："4"/"4.1"/"3.2.1"——点分段数决定层级（学界通用约定，
 # 非个案特调）：单段号 → ##、两段 → ###、三段 → ####；页 0 最大 title
@@ -73,7 +75,7 @@ def _split_layout_regions(regions: list | None) -> dict:
     """版面区域按 label 分类。返回 {fig: [Rect], table: [Rect],
     abandon: [Rect], title: [{rect, conf}], text: [Rect]}——畸形 bbox/
     空区域丢弃。"""
-    out = {"fig": [], "table": [], "abandon": [], "title": [], "text": []}
+    out = {"fig": [], "table": [], "abandon": [], "title": [], "text": [], "caption": []}
     for reg in regions or []:
         label = reg.get("label")
         bbox = reg.get("bbox")
@@ -95,6 +97,8 @@ def _split_layout_regions(regions: list | None) -> dict:
             out["title"].append({"rect": r, "conf": float(reg.get("conf") or 0.0)})
         elif label == _TEXT_LABEL:
             out["text"].append(r)
+        elif label in _CAPTION_LABELS:
+            out["caption"].append(r)
     return out
 
 
@@ -260,6 +264,28 @@ def verify_bag(vlm_md: str, truth: str) -> float:
     a = _VERIFY_STRIP.sub("", norm(vlm_md).lower())
     b = _VERIFY_STRIP.sub("", norm(truth).lower())
     return bag_f1(a, b)
+
+
+# 校验判定（T10 反馈 5 校准，2026-09-15 SubgraphRAG 29 页实测）：F1 单阈值
+# 会误杀数学页——LaTeX 命令字母（\mathbb{P} → "mathbbP"）膨胀 VLM 侧字符
+# 数，真值侧的 ℙ 却被字母数字口径剥空，实测公式页 F1 0.895 被拒、其查全率
+# 0.9994（内容零丢失）纯口径稀释。改为双阈值：
+#   查全率 ≥ _VERIFY_RECALL_MIN —— 真值侧内容覆盖（防丢内容的本质）
+#   精确率 ≥ _VERIFY_PRECISION_MIN —— VLM 侧多余字符（防幻觉）
+# 实测分布：25 个通过页 recall[0.912,1]×precision[0.927,1] 全部仍过；
+# 误杀公式页 0.9994/0.811 救回；真欠输出（recall 0.80/0.55）与退化输出
+# （只回页码 recall 0.0004）仍正确拒绝。
+_VERIFY_RECALL_MIN = 0.90
+_VERIFY_PRECISION_MIN = 0.75
+
+
+def verify_recall_precision(vlm_md: str, truth: str) -> tuple[float, float]:
+    """交叉校验查全率/精确率（字母数字+CJK 口径，同 verify_bag）。"""
+    a = _VERIFY_STRIP.sub("", norm(vlm_md).lower())
+    b = _VERIFY_STRIP.sub("", norm(truth).lower())
+    ca, cb = Counter(a), Counter(b)
+    inter = sum((ca & cb).values())
+    return inter / max(len(b), 1), inter / max(len(a), 1)
 
 
 def _render_png(
@@ -435,6 +461,7 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
                 extra_regions=lr["fig"],
                 table_regions=lr["table"],
                 text_regions=lr["text"],
+                caption_regions=lr["caption"],
             )
             if image_dir
             else ([], [])
@@ -553,7 +580,7 @@ async def parse_page_verified(
     image_dir: str | None,
     config: dict,
     cache_dir: str,
-    bag_threshold: float = 0.90,
+    recall_threshold: float = 0.90,
     sem: asyncio.Semaphore | None = None,
     layout=None,
 ) -> dict:
@@ -607,11 +634,36 @@ async def parse_page_verified(
             print(f"[vlm] p{pno + 1}: 结构化解析失败，回退文本层: {e}")
 
     truth_n = norm(prep["truth"])
+    # 退化输出一次性重试（hosted 模型偶发只回页码，实测 bag≈0.002）：
+    # 输出字母数字 <10% 真值且真值足够长 → 重打一次——退化多为服务端瞬态，
+    # 非输入确定性问题（SubgraphRAG p7 实测整页只返回 "7"）
+    if fresh and md_raw and truth_n:
+        tn = _VERIFY_STRIP.sub("", truth_n.lower())
+        vn = _VERIFY_STRIP.sub("", norm(md_raw).lower())
+        if len(tn) >= 200 and len(vn) < 0.1 * len(tn):
+            print(f"[vlm] p{pno + 1}: 退化输出（{len(vn)}/{len(tn)} 字符），重试一次")
+            try:
+                async with (sem if sem is not None else nullcontext()):
+                    res = await parse_page(
+                        file_path,
+                        pno,
+                        config,
+                        mask_regions=prep["regions"] + prep["abandon_rects"],
+                    )
+                if res["md"]:
+                    md_raw, trunc = res["md"], res["trunc"]
+            except Exception as e:  # noqa: BLE001 —— 重试失败保留原输出进校验
+                print(f"[vlm] p{pno + 1}: 退化重试失败（保留原输出）: {e}")
+
     bag = verify_bag(md_raw, prep["truth"]) if md_raw and truth_n else 0.0
-    # 短 truth（近空页/纯图页）无从校验，接受 VLM 输出（无内容可损失）
+    rec = prec = 0.0
+    if md_raw and truth_n:
+        rec, prec = verify_recall_precision(md_raw, prep["truth"])
+    # 短 truth（近空页/纯图页）无从校验，接受 VLM 输出（无内容可损失）；
+    # 正常页双阈值：查全率防丢内容、精确率防幻觉（见 _VERIFY_RECALL_MIN 注释）
     accept = bool(md_raw) and (
         len(_VERIFY_STRIP.sub("", truth_n.lower())) < 60
-        or bag >= bag_threshold
+        or (rec >= recall_threshold and prec >= _VERIFY_PRECISION_MIN)
     )
     # 原始解析结果只在通过校验时落缓存：低质输出（实测 hosted 模型对
     # 密集参考文献页偶发只回页码，bag≈0.002）不进缓存，下次运行自然
@@ -620,7 +672,14 @@ async def parse_page_verified(
         write_cache(cache_dir, raw_key, {"md": md_raw, "trunc": trunc})
     if accept:
         md = await asyncio.to_thread(_finalize_md, prep, md_raw)
-        return {"md": md, "source": "vlm", "bag": round(bag, 4), "trunc": trunc}
+        return {
+            "md": md,
+            "source": "vlm",
+            "bag": round(bag, 4),
+            "rec": round(rec, 4),
+            "prec": round(prec, 4),
+            "trunc": trunc,
+        }
     # 降级路径自身也失败（实测：pymupdf4llm 在链接注解损坏的页崩，
     # FG-RAG p6-12）→ 保留未校验的 VLM 输出——好过整页空掉，日志留痕
     try:
@@ -636,6 +695,8 @@ async def parse_page_verified(
             "md": md,
             "source": "vlm",
             "bag": round(bag, 4),
+            "rec": round(rec, 4),
+            "prec": round(prec, 4),
             "trunc": trunc,
             "fallback_reason": "fallback_error",
         }
@@ -647,6 +708,8 @@ async def parse_page_verified(
         "md": md,
         "source": "textlayer",
         "bag": round(bag, 4),
+        "rec": round(rec, 4),
+        "prec": round(prec, 4),
         "trunc": trunc,
         "fallback_reason": reason,
     }

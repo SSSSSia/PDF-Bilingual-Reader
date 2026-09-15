@@ -425,8 +425,11 @@ def test_verified_keeps_vlm_when_fallback_also_fails(tmp_path):
         "ocr.vlm_parse._textlayer_fallback",
         side_effect=IndexError("list index out of range"),
     ):
-        # bag 人为压低触发降级：VLM 输出与 truth 无重叠字符的假场景
-        with patch("ocr.vlm_parse.verify_bag", return_value=0.1):
+        # 查全率人为压低触发降级：VLM 输出与 truth 无重叠字符的假场景
+        # （T10 反馈 5：判定改为查全率/精确率双阈值，bag 仅作统计观测）
+        with patch(
+            "ocr.vlm_parse.verify_recall_precision", return_value=(0.1, 1.0)
+        ), patch("ocr.vlm_parse.verify_bag", return_value=0.1):
             out = asyncio.run(
                 vlm_parse.parse_page_verified(
                     pdf, 0, "hash6", str(tmp_path / "imgs"),
@@ -517,3 +520,70 @@ def test_vlm_noise_blocks_filtered_downstream():
     )
     parts = split_into_blocks(md)
     assert parts == ["# 3 Method", "The encoder maps inputs to outputs."]
+
+
+# ── 查全率/精确率双阈值（阶段12-T10 反馈 5，2026-09-15）──────────────
+
+def test_verify_recall_precision_admits_latex_dilution():
+    """数学页误杀根因：LaTeX 命令字母膨胀 VLM 侧字符、真值侧 Unicode 数学
+    符被口径剥空——F1 <0.90 但查全率≈1（内容零丢失）。双阈值下应通过。
+    配比取自实测（SubgraphRAG p4：F1 0.895 / recall 0.9994 / precision
+    0.811）：每 55 个正文 alnum 字符配 3 个数学符（真值侧剥空），
+    LaTeX 表示新增 ~12 个命令字母。"""
+    prose = "the probability estimate of the query answer satisfies the bound "
+    truth = (prose + "ℙ𝑄≤𝔼 ") * 20
+    vlm = (prose + r"\(\mathbb{P}(Q) \leq \mathbb{E}\) ") * 20
+    f1 = vlm_parse.verify_bag(vlm, truth)
+    rec, prec = vlm_parse.verify_recall_precision(vlm, truth)
+    assert f1 < 0.90, f"此用例的前提：F1 口径确实稀释（实测 {f1:.3f}）"
+    assert rec >= 0.90, "真值正文全覆盖"
+    assert prec >= 0.75, "LaTeX 膨胀幅度在防幻觉下限之上"
+
+
+def test_verify_recall_precision_rejects_under_output():
+    """真欠输出（VLM 只吐部分内容）：查全率低 → 仍拒绝（p1/p3 实测形态）。"""
+    truth = "first paragraph body text " * 20 + "second paragraph tail " * 20
+    vlm = "first paragraph body text " * 10
+    rec, prec = vlm_parse.verify_recall_precision(vlm, truth)
+    assert rec < 0.90
+
+
+def test_verify_recall_precision_rejects_hallucination():
+    """幻觉输出（真值全覆盖 + 大量多余字符）：精确率低 → 拒绝。"""
+    truth = "short factual sentence about retrieval"
+    vlm = "short factual sentence about retrieval " + "hallucinated garbage text " * 20
+    rec, prec = vlm_parse.verify_recall_precision(vlm, truth)
+    assert rec >= 0.90
+    assert prec < 0.75
+
+
+def test_verified_degenerate_output_retried_once(tmp_path):
+    """退化输出（hosted 偶发只回页码）：字母数字 <10% 真值 → 重试一次，
+    第二次正常输出被采纳（SubgraphRAG p7 实测整页只返回 '7'）。"""
+    # 真值需 ≥200 alnum 字符才触发退化判定（防短页误重试）
+    body = " ".join(
+        f"Long body paragraph number {i} keeps enough prose characters."
+        for i in range(12)
+    )
+    pdf = str(tmp_path / "degenerate.pdf")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_textbox(pymupdf.Rect(50, 60, 545, 260), body)
+    doc.save(pdf)
+    doc.close()
+    calls = AsyncMock(
+        side_effect=[
+            ("7", "stop"),  # 第一次：退化
+            (body, "stop"),  # 重试：正常（与真值逐字一致）
+        ]
+    )
+    with patch("ocr.vlm_parse._vlm_call", new=calls):
+        out = asyncio.run(
+            vlm_parse.parse_page_verified(
+                pdf, 0, "hash_deg", str(tmp_path / "imgs"),
+                _CFG, str(tmp_path / "cache"),
+            )
+        )
+    assert calls.await_count == 2
+    assert out["source"] == "vlm"
+    assert "Long body paragraph number 0" in out["md"]
