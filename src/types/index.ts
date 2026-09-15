@@ -61,6 +61,8 @@ export interface PipelineResult {
   progress: number;
   pages: PageResult[];
   error?: string | null;
+  /** 文献库副本路径（上传即入库）：前端会话采用它，原文件可移动/删除 */
+  file_path?: string;
 }
 
 export interface OCRJob {

@@ -314,8 +314,21 @@ async def api_run_pipeline(file_path: dict):
             status_code=429,
             detail=f"已有 {MAX_RUNNING_JOBS} 个翻译任务进行中，请等待完成后再试",
         )
+    # 上传即入库（T10 反馈 8）：源 PDF 复制进 <data_dir>/files/，此后
+    # 管线/阅读/导出全用库内副本——原文件移动/改名/删除零影响；原始
+    # 文件名作为展示名传入（标题/文献库显示用）
+    fp = str(file_path.get("file_path") or "")
+    if not os.path.isfile(fp):
+        raise HTTPException(status_code=400, detail="文件不存在")
+    display = os.path.basename(fp)
     try:
-        result = await run_pipeline(file_path["file_path"])
+        from library import materialize
+
+        fp = materialize(fp, settings.data_dir)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"入库失败：{e}")
+    try:
+        result = await run_pipeline(fp, display_name=display)
         return result
     except HTTPException:
         raise
@@ -515,16 +528,23 @@ def _append_frontend_log(log_dir: str, line: str) -> None:
 
 @app.post("/api/upload")
 async def api_upload(file: UploadFile = File(...)):
-    """dev 桥接模式：浏览器无法拿到真实文件路径，故先上传到服务端临时目录，
-    返回服务端绝对路径供流水线按路径读取。仅用于本地开发/测试。"""
-    upload_dir = os.path.join(settings.cache_dir, "uploads")
-    os.makedirs(upload_dir, exist_ok=True)
-    ext = os.path.splitext(file.filename or "doc.pdf")[1] or ".pdf"
-    dest = os.path.join(upload_dir, f"{uuid.uuid4().hex}{ext}")
+    """dev 桥接模式：浏览器无法拿到真实文件路径，故先上传到服务端，
+    返回绝对路径供流水线按路径读取。仅用于本地开发/测试。
+
+    T10 反馈 8 起直接落文献库（<data_dir>/files/<内容sha1>.pdf，去重），
+    不再进临时目录——后续管线/重开全用库内副本。"""
+    import hashlib
+
+    from library import library_dir
+
     content = await file.read()
-    with open(dest, "wb") as f:
-        f.write(content)
-    return {"path": os.path.abspath(dest)}
+    dest = os.path.join(
+        library_dir(settings.data_dir), f"{hashlib.sha1(content).hexdigest()}.pdf"
+    )
+    if not os.path.isfile(dest):
+        with open(dest, "wb") as f:
+            f.write(content)
+    return {"path": dest}
 
 
 @app.get("/api/file/raw")

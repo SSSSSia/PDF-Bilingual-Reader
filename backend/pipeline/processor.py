@@ -156,11 +156,14 @@ def _evict_jobs() -> None:
             del _jobs[jid]
 
 
-async def run_pipeline(file_path: str) -> dict:
+async def run_pipeline(file_path: str, display_name: str | None = None) -> dict:
     """
     启动一次处理任务。
     - 同一文件（内容哈希 + mtime）重复提交时复用已有任务，避免重复扣费。
     - 返回 job_id，由前端轮询 get_pipeline_status 获取结果。
+    - file_path 通常是文献库副本（上传即入库，T10 反馈 8）：display_name
+      保留用户原始文件名作标题（库副本以哈希命名，basename 不可展示）；
+      返回 file_path 让前端会话采用库内路径（原文件此后可移动）。
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"文件不存在: {file_path}")
@@ -186,6 +189,7 @@ async def run_pipeline(file_path: str) -> dict:
             "job_id": job_id,
             "status": existing["status"],
             "progress": existing["progress"],
+            "file_path": existing["file_path"],
             "reused": True,
         }
 
@@ -219,7 +223,9 @@ async def run_pipeline(file_path: str) -> dict:
             settings.data_dir,
             {
                 "doc_id": pdf_hash[:16],
-                "title": os.path.splitext(os.path.basename(file_path))[0],
+                "title": os.path.splitext(
+                    os.path.basename(display_name or file_path)
+                )[0],
                 "file_path": os.path.abspath(file_path),
                 "pdf_hash": pdf_hash,
                 "file_mtime": int(os.path.getmtime(file_path)),
@@ -229,7 +235,13 @@ async def run_pipeline(file_path: str) -> dict:
     except Exception as e:
         print(f"[docs_index] 早期登记失败（不阻断主链路）: {e}")
 
-    return {"job_id": job_id, "status": "running", "progress": 0, "reused": False}
+    return {
+        "job_id": job_id,
+        "status": "running",
+        "progress": 0,
+        "file_path": file_path,
+        "reused": False,
+    }
 
 
 def _split_page(page: dict) -> dict:
@@ -1065,7 +1077,9 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                     # 2026-09-09 用户决策：索引标题直接用上传文件名（去 .pdf），
                     # 想改名就改文件名。提取的 doc_title 只用于术语表提示词
                     # 与页眉剔除，不再决定卡片标题。
-                    "title": os.path.splitext(os.path.basename(file_path))[0],
+                    "title": os.path.splitext(
+                    os.path.basename(display_name or file_path)
+                )[0],
                     "file_path": os.path.abspath(file_path),
                     "pdf_hash": pdf_hash,
                     "page_count": len(pages),

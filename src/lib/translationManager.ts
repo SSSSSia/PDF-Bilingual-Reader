@@ -157,6 +157,15 @@ export async function startTranslation(
     return { ok: false, reason: "后端未返回 job_id，无法跟踪处理进度" };
   }
 
+  // 上传即入库（T10 反馈 8）：会话改用文献库副本路径（<data_dir>/files/
+  // <哈希>.pdf）——原文件移动/改名/删除后原版模式/对照/导出不受影响；
+  // 显示名不变（仍是用户选的文件名）
+  const libPath = start.file_path || filePath;
+  if (libPath !== filePath) {
+    pdf.setFilePath(libPath);
+    pdf.setFile({ name: fileName, size: 0, type: "application/pdf", path: libPath } as any);
+  }
+
   const key = start.job_id;
   runningKey = key;
   pdf.setSessionKey(key);
@@ -165,7 +174,7 @@ export async function startTranslation(
     title: fileName.replace(/\.pdf$/i, ""),
     kind: "job",
     snapshot: {
-      filePath,
+      filePath: libPath,
       fileName,
       pages: [],
       currentPage: 0,
@@ -174,7 +183,7 @@ export async function startTranslation(
     },
     job: { progress: 0, status: "running" },
   });
-  void poll(key, filePath);
+  void poll(key, libPath);
   return { ok: true, key };
 }
 
