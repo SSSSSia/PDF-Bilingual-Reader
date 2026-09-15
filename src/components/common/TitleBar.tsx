@@ -146,7 +146,9 @@ export default function TitleBar() {
                       ? "翻译已中断，重新打开该文档可继续"
                       : s.title
                 }
-                className={`group flex h-7 max-w-[13rem] shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors duration-150 ${
+                // 等宽页签（2026-09-15 用户反馈"标签大小不一样"）：标题
+                // 长度/运行态按钮切换不再影响外宽，标题区截断、悬停看全名
+                className={`group flex h-7 w-36 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors duration-150 ${
                   active
                     ? "border-slate-200 bg-white font-medium text-slate-900 shadow-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                     : "border-transparent text-slate-500 hover:bg-slate-200/70 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/70 dark:hover:text-slate-200"
@@ -164,9 +166,9 @@ export default function TitleBar() {
                     aria-hidden="true"
                   />
                 )}
-                <span className="truncate">{s.title}</span>
+                <span className="min-w-0 flex-1 truncate">{s.title}</span>
                 {running ? (
-                  <span className="shrink-0 text-[10px] text-blue-600 dark:text-blue-400">
+                  <span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-blue-600 dark:text-blue-400">
                     {Math.round(s.job?.progress ?? 0)}%
                   </span>
                 ) : (
