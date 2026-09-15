@@ -20,7 +20,7 @@ def test_split_layout_regions_classifies_and_drops_malformed():
         {"label": "figure", "conf": 0.8, "bbox": [10, 120, 200, 200]},
         {"label": "abandon", "conf": 0.85, "bbox": [0, 700, 600, 780]},
         {"label": "title", "conf": 0.92, "bbox": [40, 40, 500, 90]},
-        {"label": "plain text", "conf": 0.99, "bbox": [0, 0, 100, 100]},  # 非目标类
+        {"label": "plain text", "conf": 0.99, "bbox": [0, 0, 100, 100]},  # 正文区域（T10：栏判定信号）
         {"label": "title", "conf": 0.5, "bbox": [1, 1]},                  # 畸形 bbox
         {"label": "abandon", "conf": 0.7, "bbox": None},                  # 畸形 bbox
         {"label": "figure", "conf": 0.7, "bbox": [5, 5, 5, 5]},           # 空矩形
@@ -30,7 +30,10 @@ def test_split_layout_regions_classifies_and_drops_malformed():
     assert len(lr["table"]) == 1        # 仅 table
     assert len(lr["abandon"]) == 1
     assert len(lr["title"]) == 1
-    assert vlm_parse._split_layout_regions(None) == {"fig": [], "table": [], "abandon": [], "title": []}
+    assert len(lr["text"]) == 1         # plain text（栏判定兜底信号）
+    assert vlm_parse._split_layout_regions(None) == {
+        "fig": [], "table": [], "abandon": [], "title": [], "text": []
+    }
 
 
 # ── 标题定级 ─────────────────────────────────────────────────────

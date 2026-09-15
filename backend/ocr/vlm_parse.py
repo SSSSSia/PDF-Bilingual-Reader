@@ -51,14 +51,17 @@ from cache.file_cache import ocr_key, read_cache, write_cache
 _COL_WIDE = 0.55
 
 # ── 版面模型区域消费（阶段12-T9.2）────────────────────────────────
-# DocLayout-YOLO 区域按 label 分类三用：
+# DocLayout-YOLO 区域按 label 分类四用：
 #   table/figure → _figure_regions 额外候选（无框表快照补位）；
 #   abandon     → 送 VLM 前遮罩 + truth 扣除 + 输出段落剔除（三用同区域）；
-#   title       → 输出段落标题提升（页 0 最大 title→#，编号深度定级）。
+#   title       → 输出段落标题提升（页 0 最大 title→#，编号深度定级）；
+#   plain text  → _column_reading_order 栏判定的区域级信号（整栏一个粗
+#                 粒度文本块的页，块级左右计数判不出双栏，T10 反馈修复）。
 # 坐标全部为 PDF 点（layout_worker.py 已除回渲染倍率）。
 _FIG_LABELS = {"figure", "table"}
 _ABANDON_LABEL = "abandon"
 _TITLE_LABEL = "title"
+_TEXT_LABEL = "plain text"
 
 # 标题编号前缀："4"/"4.1"/"3.2.1"——点分段数决定层级（学界通用约定，
 # 非个案特调）：单段号 → ##、两段 → ###、三段 → ####；页 0 最大 title
@@ -68,8 +71,9 @@ _TITLE_NUM = re.compile(r"^\s*(\d+(?:\.\d+)*)[\s.:)]?")
 
 def _split_layout_regions(regions: list | None) -> dict:
     """版面区域按 label 分类。返回 {fig: [Rect], table: [Rect],
-    abandon: [Rect], title: [{rect, conf}]}——畸形 bbox/空区域丢弃。"""
-    out = {"fig": [], "table": [], "abandon": [], "title": []}
+    abandon: [Rect], title: [{rect, conf}], text: [Rect]}——畸形 bbox/
+    空区域丢弃。"""
+    out = {"fig": [], "table": [], "abandon": [], "title": [], "text": []}
     for reg in regions or []:
         label = reg.get("label")
         bbox = reg.get("bbox")
@@ -89,6 +93,8 @@ def _split_layout_regions(regions: list | None) -> dict:
             out["abandon"].append(r)
         elif label == _TITLE_LABEL:
             out["title"].append({"rect": r, "conf": float(reg.get("conf") or 0.0)})
+        elif label == _TEXT_LABEL:
+            out["text"].append(r)
     return out
 
 
@@ -486,6 +492,7 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
             "abandon_rects": lr["abandon"],
             "abandon_norms": abandon_norms,
             "layout_titles": layout_titles,
+            "text_regions": lr["text"],
             "layout_ok": layout_regions is not None,
             "font_evidence": font_evidence,
             "raw_blocks": page.get_text("blocks"),
@@ -512,7 +519,9 @@ def _finalize_md(prep: dict, md: str) -> str:
         md = _insert_figures(
             md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
         )
-    md = _column_reading_order(prep["raw_blocks"], md)
+    md = _column_reading_order(
+        prep["raw_blocks"], md, col_rects=prep.get("text_regions")
+    )
     md = _drop_abandon_paragraphs(md, prep.get("abandon_norms") or [])
     if prep.get("layout_titles"):
         md = _promote_titles(md, prep["layout_titles"])

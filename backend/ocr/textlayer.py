@@ -42,8 +42,9 @@ _U_TAG = re.compile(r"</?u>", re.IGNORECASE)
 # ── 双栏页列感知阅读顺序重排（2026-09-07 用户反馈"原文不全"）──────────
 # pymupdf4llm 按 y 带交错输出左右栏（DALK 首页实测：右栏顶部的段落续文
 # 被排到摘要之前，还与 Abstract 头粘连）。标准双栏页的真实阅读顺序是
-# 左栏自上而下 → 右栏自上而下。判定保守：段落→原始块文本前缀匹配必须
-# 全部命中、左右两侧各 ≥3 个窄块、x 范围有干净分栏沟，否则原样返回。
+# 左栏自上而下 → 右栏自上而下。判定保守：段落→原始块文本前缀匹配须
+# 命中大多数（少数措辞漂移段跟随邻段，见函数内）、左右两侧各 ≥3 个
+# 窄块、x 范围有干净分栏沟，否则原样返回。
 _MD_NORM = re.compile(r"[^a-z0-9]+")
 _MD_NORM_ALPHA = re.compile(r"[^a-z]+")
 _COL_WIDE = 0.55  # 块宽超过页宽此比例视为通栏（标题/摘要横排）
@@ -57,20 +58,33 @@ def _md_norm(s: str) -> str:
 
 def _match_block(h: str, norms: list[str], norms_alpha: list[str]) -> int | None:
     """markdown 段落头 → 原始块下标。先按字母数字匹配，失败退字母级
-    （上/下标转换会把 1 变 ¹、n 变 ⁿ，数字级匹配必失败，作者行实测）。"""
+    （上/下标转换会把 1 变 ¹、n 变 ⁿ，数字级匹配必失败，作者行实测）。
+
+    匹配语义锚定：段落头包含于块内（h in t），或段落以块文本开头
+    （h.startswith(t[:24])，VLM 把短块与后继块粘成一段的实测形态）。
+    反例禁入：无锚定的子串包含会让表格残块（"C %"→norm 后单字符"c"）
+    匹配几乎所有段落（DALK p8 实测 6 段全配到一个 w=17 的残块上，
+    排序 key 全为垃圾坐标）；<4 字符的头/块过短，宁可不配（跟随邻段）。"""
+    if len(h) < 4:
+        return None
     ha = _MD_NORM_ALPHA.sub("", h.lower())
     for i, t in enumerate(norms):
-        if t and (h in t or t[:24] in h):
+        if t and (h in t or (len(t) >= 4 and h.startswith(t[:24]))):
             return i
     if len(ha) >= 12:
         for i, t in enumerate(norms_alpha):
-            if t and (ha in t or t[:24] in ha):
+            if t and (ha in t or (len(t) >= 4 and ha.startswith(t[:24]))):
                 return i
     return None
 
 
-def _column_reading_order(raw_blocks: list, md: str) -> str:
-    """双栏页 markdown 段落重排为列感知顺序（raw_blocks: page.get_text('blocks')）。"""
+def _column_reading_order(raw_blocks: list, md: str, col_rects: list | None = None) -> str:
+    """双栏页 markdown 段落重排为列感知顺序（raw_blocks: page.get_text('blocks')）。
+
+    col_rects：版面模型 plain text 区域（阶段12-T10 反馈修复）——块级栏判定
+    （左右各 ≥3 窄块）失败的页（右栏整栏一个粗粒度文本块，DALK 首页实测
+    VLM 输出整页乱序而重排被拦）用区域级判定兜底：剔除通栏区域后左右
+    各 ≥2 且栏沟干净即确证双栏。None（textlayer 降级路径）= 仅块级判定。"""
     paras = [p for p in re.split(r"\n\s*\n", md) if p.strip()]
     if len(paras) < 5:
         return md
@@ -92,13 +106,18 @@ def _column_reading_order(raw_blocks: list, md: str) -> str:
         right = (not wide) and r.x0 >= page_w / 2
         keys.append((1 if right else 0, r.y0, idx))
         matched.append((r, right, wide))
-    # 文本段定位不到坐标：不重排（防未知版式被搅乱）。纯图片引用段例外——
-    # 它们没有对应文本块，不能因为它们放弃整页重排（DALK p7 实测：
-    # 有快照的页全部跳过重排，换栏断词的续文永远排在其段头前面）
-    if any(
-        k is None and not _IMG_ONLY.match(paras[idx])
+    # 文本段定位不到坐标：少数（≤1/3，措辞漂移/行合并实测形态）时跟随
+    # 邻段排序键重排（保持原顺序局部性，不跨页乱跳）；大面积对不上
+    # （数学页 LaTeX 与文本层逐字符两套表示、参考文献切段差异）说明
+    # 版式未被理解，仍整体放弃（防未知版式被搅乱）。纯图片引用段
+    # 无对应文本块，不计入失配统计（DALK p7 实测：有快照的页全部
+    # 跳过重排，换栏断词的续文永远排在其段头前面）。
+    miss = [
+        idx
         for idx, k in enumerate(keys)
-    ):
+        if k is None and not _IMG_ONLY.match(paras[idx])
+    ]
+    if len(miss) > max(1, len(paras) // 3):
         return md
     # 纯图片引用段（快照插在 caption 前的 ![Figure](...)）：坐标匹配不到
     # 文本，跟随其后第一个有 key 的段落（同 key + idx 更小 → 排在其前），
@@ -110,18 +129,35 @@ def _column_reading_order(raw_blocks: list, md: str) -> str:
                 jdx += 1
             if jdx < len(paras) and keys[jdx] is not None:
                 keys[idx] = keys[jdx]
-    # 页末追加的快照（没配到 caption）：退而跟随前一段，绝不留在原地挡重排
+    # 定位失败段与页末追加快照（没配到 caption 的）：跟随前一段（局部性）；
+    # 页首连续失配段反向跟随后继——两者都不会留在原地挡重排
     for idx in range(1, len(paras)):
         if keys[idx] is None and keys[idx - 1] is not None:
             keys[idx] = keys[idx - 1]
+    for idx in range(len(paras) - 2, -1, -1):
+        if keys[idx] is None and keys[idx + 1] is not None:
+            keys[idx] = keys[idx + 1]
     if any(k is None for k in keys):
         return md
     lefts = [m[0] for m in matched if m and not m[1] and not m[2]]
     rights = [m[0] for m in matched if m and m[1]]
-    if len(lefts) < 3 or len(rights) < 3:
-        return md  # 不像双栏
-    if max(r.x1 for r in lefts) > min(r.x0 for r in rights) + 5:
-        return md  # 无干净分栏沟
+    if (
+        len(lefts) < 3
+        or len(rights) < 3
+        or max(r.x1 for r in lefts) > min(r.x0 for r in rights) + 5
+    ):
+        # 块级栏判定失败：区域级兜底（剔除通栏区域后左右各 ≥2 + 干净栏沟）。
+        # 版面模型按语义切分，右栏整栏一个文本块的粗粒度 PDF 也能正确分栏
+        cols = [r for r in (col_rects or []) if r.width <= _COL_WIDE * page_w]
+        cl = [r for r in cols if r.x0 < page_w / 2]
+        cr = [r for r in cols if r.x0 >= page_w / 2]
+        if (
+            not cols
+            or len(cl) < 2
+            or len(cr) < 2
+            or max(r.x1 for r in cl) > min(r.x0 for r in cr) + 5
+        ):
+            return md  # 不像双栏（块级/区域级均未确证）
     ordered = sorted(range(len(paras)), key=lambda i: keys[i])
     return "\n\n".join(paras[i] for i in ordered)
 
