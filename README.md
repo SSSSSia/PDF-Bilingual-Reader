@@ -13,7 +13,7 @@
 - 🈯 **翻译质量工程**：术语表两遍法、批翻减半重试、回声/融合译文三层层层设防、块级手动重译、提示词版本化
 - 💾 **内容寻址缓存**：同一段文字/同一页提取/同一公式全局只算一次，重开文档秒出；版本号熔断让算法升级自动失效旧缓存
 - 🛠 桌面级体验：页面缩略图导航、暗色模式、拖拽上传、导出双语 Markdown / 排版对照 PDF、中文排版修正（斜体转粗体）、链接外部浏览器打开
-- ☁️ 全部走云端 API（OCR 与翻译均用 [SiliconFlow](https://siliconflow.cn)，免费额度即可），exe 不含任何模型权重
+- ☁️ 全部走云端 API（OCR 与翻译均用 [SiliconFlow](https://cloud.siliconflow.cn/i/H8b0vER1)，免费额度即可），exe 不含任何模型权重
 
 > 设计目标：**个人本地使用 + 开源可复刻**。配置一次 API Key 即可开箱阅读；他人 clone 后按本文档即可跑起来。
 
@@ -74,7 +74,7 @@ Rust 壳 (src-tauri) ── reqwest ──► FastAPI 后端 (127.0.0.1:8000)
 
 到 [Releases](https://github.com/SSSSSia/PDF-Reader/releases) 下载安装包（MSI 或 NSIS exe，x64），安装后：
 
-1. 打开 设置 → 填入 SiliconFlow API Key（OCR 与翻译共用，[免费注册](https://siliconflow.cn)即可领取额度）
+1. 打开 设置 → 填入 SiliconFlow API Key（OCR 与翻译共用，[免费注册](https://cloud.siliconflow.cn/i/H8b0vER1)即可领取额度）
 2. 「+ 添加文章」上传 PDF → 翻译自动开始，完成后进入阅读
 
 安装包已内置 Python 后端与 BabelDOC 运行时，**无需安装 Python 或任何依赖**；上传的 PDF 会自动复制进应用数据目录（`%APPDATA%/pdf-reader/files/`），此后原文件移动/删除均不影响阅读与导出。
