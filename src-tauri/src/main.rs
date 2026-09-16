@@ -27,6 +27,16 @@ fn main() {
     };
 
     let app = tauri::Builder::default()
+        // 单实例守卫必须最先注册（插件文档约定）：重复启动时聚焦已有
+        // 窗口并退出新进程——此前无守卫，新实例启动前的 taskkill 会杀掉
+        // 旧实例的后端，造成多窗口互相失联
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
@@ -88,16 +98,30 @@ fn main() {
                     .output();
                 std::thread::sleep(std::time::Duration::from_millis(300));
 
-                let handle = _app.handle().clone();
-                let sidecar = handle
+                // onedir sidecar（v0.14.3）：onefile 每次启动解压 66MB +
+                // Defender 对落盘文件全量重扫，启动耗时数秒~半分钟且随机
+                // （用户装机实测）；onedir 直跑安装目录内 exe，仅升级后首启
+                // 扫描一次。exe 及 _internal 经 resources 随包分发在
+                // pdf-backend-od/，BabelDOC 运行时同样落在 exe 同级，其
+                // 「exe 同级 babeldoc-runtime/」检测不变。不再用 externalBin
+                // 单文件约定，改为显式定位资源目录内的 exe。
+                use tauri_plugin_shell::ShellExt;
+                let backend_exe = _app
+                    .path()
+                    .resource_dir()
+                    .map_err(|e| format!("定位资源目录失败: {}", e))?
+                    .join("pdf-backend-od")
+                    .join("pdf-backend.exe");
+                if !backend_exe.exists() {
+                    return Err(format!("内嵌后端不存在: {}", backend_exe.display()));
+                }
+                let (mut rx, child) = _app
                     .shell()
-                    .sidecar("pdf-backend")
-                    .map_err(|e| format!("定位内嵌后端失败: {}", e))?;
-                let (mut rx, child) = sidecar
+                    .command(backend_exe)
                     .spawn()
                     .map_err(|e| format!("启动内嵌后端失败: {}", e))?;
 
-                if let Some(state) = handle.try_state::<AppState>() {
+                if let Some(state) = _app.try_state::<AppState>() {
                     *state
                         .backend_child
                         .lock()

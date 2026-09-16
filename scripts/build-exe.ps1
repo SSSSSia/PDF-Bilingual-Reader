@@ -33,8 +33,11 @@ if (-not $SkipRuntime) {
     if (-not (Test-Path (Join-Path $runtimeDir "python.exe"))) {
         throw "运行时暂存后仍缺 python.exe：$runtimeDir"
     }
-    # tauri 2 CLI 无 --resources 参数：经 -c 配置合并注入（相对 src-tauri 解析）
-    $configArg = @("-c", '{\"bundle\":{\"resources\":{\"../build/babeldoc-runtime/\":\"babeldoc-runtime/\"}}}')
+    # tauri 2 CLI 无 --resources 参数：经 -c 配置合并注入（相对 src-tauri 解析）。
+    # 两项都落在 pdf-backend-od/ 之内：onedir 后端 exe 在资源目录的
+    # pdf-backend-od/ 下，BabelDOC 运行时保持「exe 同级 babeldoc-runtime/」
+    # 的检测约定不变（babeldoc_runtime.py 定位链）
+    $configArg = @("-c", '{\"bundle\":{\"resources\":{\"../build/babeldoc-runtime/\":\"pdf-backend-od/babeldoc-runtime/\",\"../src-tauri/sidecar/pdf-backend-od/\":\"pdf-backend-od/\"}}}')
 }
 else {
     Write-Host "==> [1/$steps] 跳过运行时暂存（-SkipRuntime，产物将不含 BabelDOC！）" -ForegroundColor Yellow
@@ -47,7 +50,7 @@ if (-not $SkipBackend) {
 else {
     # 防呆（2026-09-13 实测踩坑）：-SkipBackend 跳过了含新端点的 sidecar，
     # 装机后旧后端 404。后端源码比 sidecar 产物新时拒绝跳过。
-    $sidecar = Get-ChildItem (Join-Path $root "src-tauri\sidecar") -Filter "pdf-backend-*.exe" |
+    $sidecar = Get-ChildItem (Join-Path $root "src-tauri\sidecar\pdf-backend-od") -Filter "pdf-backend.exe" |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     $backendNewest = Get-ChildItem (Join-Path $root "backend") -Recurse -Include "*.py" |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1

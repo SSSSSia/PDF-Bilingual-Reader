@@ -283,7 +283,7 @@ powershell -ExecutionPolicy Bypass -File scripts/build-exe.ps1
 
 产物位于 `src-tauri/target/release/bundle/`。
 
-单独构建后端 sidecar（产出 `src-tauri/sidecar/pdf-backend-<triple>.exe`）：
+单独构建后端 sidecar（产出 onedir 目录 `src-tauri/sidecar/pdf-backend-od/`，v0.14.3 起弃用 onefile——其每次启动解压 66MB + Defender 全量重扫导致启动耗时数秒~半分钟且随机）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1
