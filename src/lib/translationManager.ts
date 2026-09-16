@@ -154,6 +154,11 @@ export async function startTranslation(
   }
   if (!start.job_id) {
     pdf.setLoading(false);
+    // FastAPI 错误体（{"detail": "..."}）：Rust 转发层对非 2xx 也原样
+    // 回传响应体，需在此显式识别，否则用户只能看到泛化的 job_id 提示
+    if (start.detail) {
+      return { ok: false, reason: start.detail };
+    }
     return { ok: false, reason: "后端未返回 job_id，无法跟踪处理进度" };
   }
 

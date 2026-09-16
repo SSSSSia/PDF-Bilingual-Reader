@@ -120,3 +120,50 @@ def test_api_folder_crud_and_move(tmp_path, monkeypatch):
 
     assert client.post("/api/folders/delete", json={"folder_id": fid}).json()["ok"]
     assert client.get("/api/docs").json()["folders"] == []
+
+
+# ---------------- 删除文献 ----------------
+
+
+def test_delete_doc_index_layer(tmp_path):
+    docs_index.upsert_doc(str(tmp_path), _doc())
+    assert docs_index.delete_doc(str(tmp_path), _doc()["doc_id"])
+    assert docs_index.get_doc(str(tmp_path), _doc()["doc_id"]) is None
+    assert not docs_index.delete_doc(str(tmp_path), "ghost")
+
+
+def test_api_delete_doc_cleans_library_copy(tmp_path, monkeypatch):
+    from main import settings
+
+    monkeypatch.setattr(type(settings), "data_dir", property(lambda self: str(tmp_path)))
+    monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
+    # 库内副本 + 快照图缓存就位
+    files_dir = tmp_path / "files"
+    files_dir.mkdir()
+    lib_pdf = files_dir / f"{_doc()['pdf_hash']}.pdf"
+    lib_pdf.write_bytes(b"%PDF-demo")
+    img_dir = tmp_path / "cache" / "images" / _doc()["doc_id"]
+    img_dir.mkdir(parents=True)
+    (img_dir / "fig_p001_00.png").write_bytes(b"png")
+    docs_index.upsert_doc(str(tmp_path), _doc(file_path=str(lib_pdf)))
+
+    assert client.post("/api/docs/delete", json={"doc_id": _doc()["doc_id"]}).json()["ok"]
+    assert docs_index.get_doc(str(tmp_path), _doc()["doc_id"]) is None
+    assert not lib_pdf.exists()  # 库内副本已清
+    assert not img_dir.exists()  # 快照图缓存已清
+    assert client.post("/api/docs/delete", json={"doc_id": "ghost"}).status_code == 404
+    assert client.post("/api/docs/delete", json={}).status_code == 400
+
+
+def test_api_delete_doc_never_touches_original_file(tmp_path, monkeypatch):
+    """用户原文件（files/ 目录之外）绝不被删——只清库内副本。"""
+    from main import settings
+
+    monkeypatch.setattr(type(settings), "data_dir", property(lambda self: str(tmp_path)))
+    monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
+    outside = tmp_path / "original.pdf"
+    outside.write_bytes(b"%PDF-demo")
+    docs_index.upsert_doc(str(tmp_path), _doc(file_path=str(outside)))
+
+    assert client.post("/api/docs/delete", json={"doc_id": _doc()["doc_id"]}).json()["ok"]
+    assert outside.exists()  # 原文件保留

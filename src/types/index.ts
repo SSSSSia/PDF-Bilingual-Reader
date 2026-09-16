@@ -63,6 +63,8 @@ export interface PipelineResult {
   error?: string | null;
   /** 文献库副本路径（上传即入库）：前端会话采用它，原文件可移动/删除 */
   file_path?: string;
+  /** FastAPI 错误体字段（非 2xx 响应被转发层原样回传时出现） */
+  detail?: string;
 }
 
 export interface OCRJob {

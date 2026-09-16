@@ -11,6 +11,7 @@ import time
 import zlib
 import uvicorn
 import os
+import shutil
 import sys
 import json
 import uuid
@@ -319,7 +320,10 @@ async def api_run_pipeline(file_path: dict):
     # 文件名作为展示名传入（标题/文献库显示用）
     fp = str(file_path.get("file_path") or "")
     if not os.path.isfile(fp):
-        raise HTTPException(status_code=400, detail="文件不存在")
+        raise HTTPException(
+            status_code=400,
+            detail="源文件不存在（可能已被移动、改名或删除）。请在文献库重新上传该 PDF，翻译缓存仍在、重传即恢复。",
+        )
     display = os.path.basename(fp)
     try:
         from library import materialize
@@ -471,6 +475,41 @@ async def api_rename_doc(payload: dict):
     if not docs_index.rename_doc(settings.data_dir, doc_id, title):
         raise HTTPException(status_code=404, detail="文档索引中不存在该记录")
     return {"ok": True, "title": title[:100]}
+
+
+@app.post("/api/docs/delete")
+async def api_delete_doc(payload: dict):
+    """删除文献：移除索引条目 + 快照图缓存 + 文献库源副本。
+
+    提取/翻译缓存按内容哈希寻址、与单篇文献无绑定关系，保留——
+    删除后重新上传同一文件立即缓存命中恢复，反悔零成本。
+    """
+    import docs_index
+
+    doc_id = str(payload.get("doc_id") or "").strip()
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="缺少 doc_id")
+    doc = docs_index.get_doc(settings.data_dir, doc_id)
+    if not docs_index.delete_doc(settings.data_dir, doc_id):
+        raise HTTPException(status_code=404, detail="文档索引中不存在该记录")
+    # 快照图缓存（cache/images/<doc_id>）
+    shutil.rmtree(
+        os.path.join(settings.cache_dir, "images", doc_id), ignore_errors=True
+    )
+    # 文献库源副本：仅清 <data_dir>/files/ 之内的库文件，
+    # 用户本地原文件（docs_index 里存的历史路径）绝不动
+    fp = str((doc or {}).get("file_path") or "")
+    files_root = os.path.join(settings.data_dir, "files")
+    if (
+        fp.startswith(files_root + os.sep)
+        and os.path.isfile(fp)
+        and os.path.commonpath([fp, files_root]) == files_root
+    ):
+        try:
+            os.remove(fp)
+        except OSError:
+            pass  # 库文件删除失败不阻断条目删除
+    return {"ok": True}
 
 
 @app.post("/api/docs/open")

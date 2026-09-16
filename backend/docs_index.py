@@ -73,6 +73,17 @@ def get_doc(data_dir: str, doc_id: str) -> dict | None:
     return None
 
 
+def delete_doc(data_dir: str, doc_id: str) -> bool:
+    """按 doc_id 删除索引条目（原子落盘）；不存在返回 False。
+    快照图缓存与库内副本的清理由 API 层负责（此处只管索引）。"""
+    docs = load_index(data_dir)
+    remaining = [d for d in docs if d.get("doc_id") != doc_id]
+    if len(remaining) == len(docs):
+        return False
+    _atomic_write(data_dir, remaining)
+    return True
+
+
 def _atomic_write(data_dir: str, data, filename: str = INDEX_FILENAME) -> None:
     os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, filename)

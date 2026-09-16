@@ -5,6 +5,7 @@ import {
   renameFolder,
   deleteFolder,
   moveDoc,
+  deleteDoc,
 } from "../lib/bridge";
 import type { DocMeta, FolderMeta } from "../types";
 
@@ -23,6 +24,7 @@ interface LibraryState {
   renameFolder: (folderId: string, name: string) => Promise<void>;
   deleteFolder: (folderId: string) => Promise<void>;
   moveDoc: (docId: string, folderId: string | null) => Promise<void>;
+  deleteDoc: (docId: string) => Promise<void>;
 }
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
@@ -59,6 +61,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
   moveDoc: async (docId, folderId) => {
     await moveDoc(docId, folderId);
+    await get().fetchAll();
+  },
+  deleteDoc: async (docId) => {
+    await deleteDoc(docId);
     await get().fetchAll();
   },
 }));

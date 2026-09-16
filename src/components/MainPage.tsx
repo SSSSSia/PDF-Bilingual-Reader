@@ -37,7 +37,8 @@ export default function MainPage() {
   const { folderId } = useParams();
   const { pages, isLoading, error, setError } = usePdfStore();
   const { mode } = useUiStore();
-  const { docs, folders, loaded, fetchAll, moveDoc } = useLibraryStore();
+  const { docs, folders, loaded, fetchAll, moveDoc, deleteDoc } =
+    useLibraryStore();
   const sessions = useSessionsStore((s) => s.sessions);
   // 进行中的翻译任务：与"当前活跃阅读会话"解耦
   const runningJob = sessions.find((s) => s.job?.status === "running");
@@ -47,6 +48,8 @@ export default function MainPage() {
   // 用 ref 保证同一文件只跳一次；处理新文件时重置。
   const navigatedRef = useRef(false);
   const [openingId, setOpeningId] = useState<string | null>(null);
+  // 删除文献的二次确认目标（null = 弹窗关闭）
+  const [deletingDoc, setDeletingDoc] = useState<DocMeta | null>(null);
   // 扩展：打开文献时发现后端仍在翻译 → 提示接管
   const [attachPrompt, setAttachPrompt] = useState<{
     jobId: string;
@@ -666,6 +669,32 @@ export default function MainPage() {
                       </svg>
                       重命名
                     </button>
+                    <div className="my-1 border-t border-slate-100 dark:border-slate-700" />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuDoc(null);
+                        setDeletingDoc(d);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-600 transition-colors duration-150 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/25"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-3.5 w-3.5 shrink-0"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                        <path d="M10 11v6M14 11v6" />
+                      </svg>
+                      删除文献
+                    </button>
                     <p className="px-3 py-1.5 text-xs font-semibold text-slate-400 dark:text-slate-500">
                       移动到文件夹
                     </p>
@@ -836,6 +865,25 @@ export default function MainPage() {
           });
         }}
         onCancel={() => setReextract(null)}
+      />
+
+      {/* 删除文献：二次确认（清理索引条目/快照图/库内副本，翻译缓存保留） */}
+
+      <ConfirmDialog
+        open={deletingDoc !== null}
+        title={`删除「${deletingDoc?.title ?? ""}」`}
+        description="将从文献库移除该文章，并清理其快照图与库内文件副本。翻译缓存仍保留——重新上传同一 PDF 可立即恢复，但文献本身不可恢复。"
+        confirmText="删除"
+        cancelText="取消"
+        onConfirm={() => {
+          const d = deletingDoc;
+          setDeletingDoc(null);
+          if (d)
+            void deleteDoc(d.doc_id).catch((e) =>
+              setError(e instanceof Error ? e.message : String(e)),
+            );
+        }}
+        onCancel={() => setDeletingDoc(null)}
       />
     </div>
   );

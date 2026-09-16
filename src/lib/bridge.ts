@@ -149,6 +149,12 @@ export async function renameDoc(docId: string, title: string): Promise<void> {
   await postJson(`${API_BASE}/api/docs/rename`, { doc_id: docId, title });
 }
 
+/** 删除文献：移除索引条目 + 快照图缓存 + 库内源副本。
+ * 提取/翻译缓存按内容寻址保留——重新上传同一文件立即命中恢复。 */
+export async function deleteDoc(docId: string): Promise<void> {
+  await postJson(`${API_BASE}/api/docs/delete`, { doc_id: docId });
+}
+
 /**
  * 前端日志上报（崩溃/未捕获异常）：落到后端 logs/frontend.log。
  * 打包 exe 后没有控制台，这是排查崩溃的主要线索。静默失败（日志上报
