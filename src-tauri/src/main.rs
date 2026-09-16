@@ -105,7 +105,6 @@ fn main() {
                 // pdf-backend-od/，BabelDOC 运行时同样落在 exe 同级，其
                 // 「exe 同级 babeldoc-runtime/」检测不变。不再用 externalBin
                 // 单文件约定，改为显式定位资源目录内的 exe。
-                use tauri_plugin_shell::ShellExt;
                 let backend_exe = _app
                     .path()
                     .resource_dir()
@@ -113,7 +112,7 @@ fn main() {
                     .join("pdf-backend-od")
                     .join("pdf-backend.exe");
                 if !backend_exe.exists() {
-                    return Err(format!("内嵌后端不存在: {}", backend_exe.display()));
+                    return Err(format!("内嵌后端不存在: {}", backend_exe.display()).into());
                 }
                 let (mut rx, child) = _app
                     .shell()
