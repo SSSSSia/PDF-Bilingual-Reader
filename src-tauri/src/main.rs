@@ -132,8 +132,21 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
-        // 应用退出时杀掉内嵌后端，避免残留进程继续占用 8000 端口
+        // 应用退出时清扫内嵌后端，避免残留进程继续占用 8000 端口。
+        // child.kill() 只杀 Tauri 直接子进程，而 PyInstaller onefile 的
+        // uvicorn 跑在引导器派生的同名孙进程里（Windows 不向子进程传播
+        // kill），孤儿会继续占 8000——终端另起后端即报端口占用。按映像
+        // 名 /T 全树清扫才能杀净（进程名应用独占，与启动前清理同口径）；
+        // 仅 release 有内嵌后端，dev 终端自起的后端不受影响。
         if let tauri::RunEvent::Exit = event {
+            #[cfg(not(debug_assertions))]
+            {
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/T", "/IM", "pdf-backend.exe"])
+                    .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                    .output();
+            }
             if let Some(state) = app_handle.try_state::<AppState>() {
                 if let Ok(mut guard) = state.backend_child.lock() {
                     if let Some(child) = guard.take() {
