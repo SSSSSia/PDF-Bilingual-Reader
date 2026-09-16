@@ -16,6 +16,8 @@
 - ☁️ 全部走云端 API（OCR 与翻译均用 [SiliconFlow](https://siliconflow.cn)，免费额度即可），exe 不含任何模型权重（排版对照首次使用时在线下载约 50MB 版面权重）
 
 > 设计目标：**个人本地使用 + 开源可复刻**。配置一次 API Key 即可开箱阅读；他人 clone 后按本文档即可跑起来。
+>
+> 🇨🇳 国内访问：仓库同步托管于 [Gitee 镜像](https://gitee.com/sssssia/pdf-reader)；安装包体积较大，请到 [GitHub Releases](https://github.com/SSSSSia/PDF-Reader/releases) 下载。
 
 ---
 
