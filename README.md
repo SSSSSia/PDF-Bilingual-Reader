@@ -1,15 +1,18 @@
 # PDF 双语对照阅读器
 
-本地优先的 **PDF 双语对照阅读 / 翻译桌面软件**：打开 PDF → 文本层/OCR 提取 → LLM 翻译 → **左右双语对照** / **译文紧跟原文** / **原版对照**三种模式阅读。
+本地优先的 **PDF 双语对照阅读 / 翻译桌面软件**：打开 PDF → 文本层/OCR 提取（VLM 结构化解析交叉校验）→ LLM 翻译 → **左右双语对照** / **译文紧跟原文** / **原版对照**三种模式阅读，还可一键生成 **BabelDOC 排版对照 PDF**。
 
 **核心能力一览**：
 
 - 📖 **三种阅读模式**：左右双栏对照 / 译文紧跟原文 / **原版对照**（pdfjs 像素级原样渲染 + 已译块高亮 + 点击看译文浮层，公式/图表/复杂版式零损失）
+- 🔬 **识别引擎混合架构**：区域快照+遮罩 → PaddleOCR-VL 整页结构化解析（公式成 LaTeX）→ 与文本层交叉校验（查全率≥0.90×精确率≥0.75 双阈值），不达标自动降级文本层管线，内容零损失兜底；DocLayout-YOLO 版面模型提供标题层级/无框表/版权噪音结构信号
+- 🗂 **文献库与多会话**：已翻译文章持久化列表（缓存重建秒开）、文件夹归类/重命名/删除（二次确认）、多篇文章同时后台翻译、标题栏全局进度、**上传即入库**（PDF 自动复制进应用数据目录，原文件移动/改名/删除零影响）
+- 📄 **BabelDOC 排版对照 PDF**：一键生成原版排版+译文的对照 PDF（随包内置运行时，开箱即用；单并发排队 + 实时进度）
 - 🧮 **公式全家桶**：提取期公式占位符保护 → KaTeX 渲染；公式密集块可按需「式」按钮 → 视觉模型转 LaTeX（块级缓存幂等）
-- 📊 **图表处理**：图表区域检测与快照嵌入；表格按需「译」按钮生成**译制图**（保留原排版，表内文字译成中文）
+- 📊 **图表处理**：图表区域检测与快照嵌入（caption 边界收夹防吞正文）；表格按需「译」按钮生成**译制图**（保留原排版，表内文字译成中文）
 - 🈯 **翻译质量工程**：术语表两遍法、批翻减半重试、回声/融合译文三层层层设防、块级手动重译、提示词版本化
 - 💾 **内容寻址缓存**：同一段文字/同一页提取/同一公式全局只算一次，重开文档秒出；版本号熔断让算法升级自动失效旧缓存
-- 🛠 桌面级体验：页面缩略图导航、暗色模式、拖拽上传、导出双语 Markdown/纯文本、中文排版修正（斜体转粗体）、链接外部浏览器打开
+- 🛠 桌面级体验：页面缩略图导航、暗色模式、拖拽上传、导出双语 Markdown / 排版对照 PDF、中文排版修正（斜体转粗体）、链接外部浏览器打开
 - ☁️ 全部走云端 API（OCR 与翻译均用 [SiliconFlow](https://siliconflow.cn)，免费额度即可），exe 不含任何模型权重
 
 > 设计目标：**个人本地使用 + 开源可复刻**。配置一次 API Key 即可开箱阅读；他人 clone 后按本文档即可跑起来。
@@ -26,7 +29,9 @@
 | 原版模式 | pdfjs-dist（canvas 逐页渲染 + 坐标 overlay） |
 | 后端 | FastAPI（Python 3.11+），以 Tauri **sidecar** 形式内嵌随 exe 分发 |
 | PDF 解析 | PyMuPDF + pymupdf4llm（文本层优先，扫描页混合 OCR） |
+| 版面模型 | DocLayout-YOLO（随包 BabelDOC 运行时自带，独立子进程调用；标题/图表/噪音区域信号） |
 | OCR | SiliconFlow `PaddlePaddle/PaddleOCR-VL-1.5`（文档解析 VLM，整页/公式块/表格通用） |
+| 排版对照 PDF | [BabelDOC](https://github.com/funstory-ai/BabelDOC) 0.6.4（独立 venv 随包捆绑） |
 | 翻译 | SiliconFlow（OpenAI 兼容 `chat/completions`），provider 抽象可扩展（deepl/google 占位待实现） |
 
 架构数据流：
@@ -38,7 +43,11 @@ React 前端 (src/)
 Rust 壳 (src-tauri) ── reqwest ──► FastAPI 后端 (127.0.0.1:8000)
                                     │  pipeline: 提取→切块→翻译→回填
                                     │  ├─ 文本层提取 (PyMuPDF) + 扫描页 OCR
-                                    │  ├─ 布局分析：双栏重排/跨页合并/块级 bbox
+                                    │  ├─ 数字页主路径：区域快照+遮罩 →
+                                    │  │   PaddleOCR-VL 整页结构化解析 →
+                                    │  　  交叉校验（查全率×精确率）→ 降级兜底
+                                    │  ├─ 布局分析：DocLayout-YOLO 版面区域 +
+                                    │  │   双栏重排/跨页合并/块级 bbox
                                     │  └─ 缓存：OCR 层 / 译文层 / 公式层（内容寻址）
                                     │  HTTPS + Bearer Key
                                     ▼
@@ -58,6 +67,17 @@ Rust 壳 (src-tauri) ── reqwest ──► FastAPI 后端 (127.0.0.1:8000)
 | SiliconFlow API Key | — | OCR 与翻译（免费额度即可） |
 
 > 分发包仅面向 **Windows**。文档写清了依赖与步骤，便于他人参考复刻，但不保证开箱跨平台。
+
+---
+
+## 安装即用（推荐普通用户）
+
+到 [Releases](https://github.com/SSSSSia/PDF-Reader/releases) 下载安装包（MSI 或 NSIS exe，x64），安装后：
+
+1. 打开 设置 → 填入 SiliconFlow API Key（OCR 与翻译共用，[免费注册](https://siliconflow.cn)即可领取额度）
+2. 「+ 添加文章」上传 PDF → 翻译自动开始，完成后进入阅读
+
+安装包已内置 Python 后端与 BabelDOC 运行时，**无需安装 Python 或任何依赖**；上传的 PDF 会自动复制进应用数据目录（`%APPDATA%/pdf-reader/files/`），此后原文件移动/删除均不影响阅读与导出。
 
 ---
 
@@ -160,13 +180,15 @@ npm run dev
 %APPDATA%/pdf-reader/            # Windows（无 APPDATA 环境时退回 ~/.pdf-reader/）
 ├── config.json            # 应用配置（另有 .bak 备份）
 ├── docs_index.json        # 文档索引：主页"已翻译文章"列表（doc_id/标题/路径/页数/时间）
+├── files/                 # 文献库：上传即入库的 PDF 副本（<内容哈希>.pdf，哈希去重）
+├── logs/                  # 后端 sidecar 日志（打包版排障主线索）
 └── cache/
     ├── 00/ … ff/          # 内容寻址 JSON 条目（256 个哈希分桶）
     │                      #   - 提取层：文件哈希+页号 → 该页 blocks
     │                      #   - 译文层：原文哈希+语言+模型+提示词版本 → 译文
     │                      #   - 公式层：pdf哈希+页号+bbox+模型 → LaTeX
     ├── images/<论文哈希>/  # 图表快照 PNG + 译制图（.zh.vN.png）
-    └── uploads/           # 浏览器模式上传的 PDF 副本（Tauri 模式直接读原路径不留副本）
+    └── uploads/           # 浏览器模式上传的 PDF 副本（Tauri 模式直接读库内副本）
 ```
 
 缓存设计要点：
@@ -188,12 +210,18 @@ npm run dev
 | **紧跟** | 顺读全文 | 原文段下嵌入译文，单栏沉浸阅读 |
 | **原版对照** | 公式/图表/复杂版式 | pdfjs 像素级渲染原页面，已译块蓝色高亮（支持跨页/断栏多段），点击浮层看译文；公式图表零损失 |
 
+### 文献库
+
+- **已翻译文章**列表持久化（重启秒开，缓存重建不重算）；文件夹归类、重命名、删除（二次确认；删除只清索引条目/快照图/库内副本，**不动你的原文件**，翻译缓存保留——重新上传同一 PDF 立即恢复）
+- **多会话并行**：一篇文章翻译中可切换其他文章继续操作，标题栏全局进度徽标随时跳回
+- **上传即入库**：翻译时自动把 PDF 复制进 `files/` 库目录（内容哈希命名去重），会话/缓存/导出全走库内副本
+
 ### 按需交互
 
 - **块级重译**：悬停任意段落 →「译 / 重译」按钮，单块重新翻译（与全文同链路，结果写回同一缓存 key，重开不丢）
 - **公式识别**：悬停公式密集块 →「式」按钮，裁剪块区域送 PaddleOCR-VL 转 LaTeX，KaTeX 渲染在译文位；结果按 `(pdf哈希, 页号, bbox, 模型)` 缓存，重开文档自动回填
 - **表格译制图**：表格快照右上角「译」按钮 → 结构化重建（跨列行/原比例列宽对齐原图），表内文字译成中文，就地替换显示
-- **导出**：双语 Markdown / 纯文本（ExportBar）
+- **导出**：双语 Markdown / **排版对照 PDF**（BabelDOC 生成，主色导出按钮二次选格式；未生成时引导前往对照模式接力）
 - **链接**：正文链接一律外部浏览器打开，不会顶掉阅读界面
 
 ### 阅读体验细节（自动处理）
@@ -222,6 +250,13 @@ npm run dev
 | POST | `/api/config/reload` | 强制重载配置 |
 | POST | `/api/config/test` | API 连通性测试（设置页按钮） |
 | GET | `/api/asset` | 缓存目录内图片访问（安全约束：仅 cache_dir 内） |
+| GET | `/api/docs` | 文献库列表（文档索引 + 文件夹） |
+| POST | `/api/docs/open` | 按 doc_id 从缓存重建已翻译会话（秒开） |
+| POST | `/api/docs/move` | 移动文档到文件夹 |
+| POST | `/api/docs/rename` | 改文献显示名 |
+| POST | `/api/docs/delete` | 删除文献（清索引/快照图/库内副本，不动原文件） |
+| POST | `/api/folders` 等 | 文件夹新建/改名/删除 |
+| POST | `/api/log` | 前端日志上报（打包版排障） |
 | POST | `/api/figure/translate` | 表格快照按需译制图 |
 | POST | `/api/block/translate` | 单块手动翻译/重翻 |
 | POST | `/api/block/formula` | 公式块按需识别（bbox 裁剪 → LaTeX） |
@@ -282,7 +317,7 @@ import babeldoc 冒烟自检），产物经 tauri `resources` 落位到后端 ex
 ## 测试与 CI
 
 ```powershell
-# 后端测试（无网络依赖，使用 mock），当前 91 项
+# 后端测试（无网络依赖，使用 mock），当前 250+ 项
 cd backend
 pip install -r requirements-dev.txt
 pytest
@@ -310,11 +345,15 @@ PDF-Reader/
 │   │   ├── ReaderToolbar.tsx   # 模式切换 / 缩放工具栏
 │   │   ├── ConfigPage.tsx      # 设置页
 │   │   ├── ExportBar.tsx       # 导出双语 Markdown / TXT
+│   │   ├── ExportBar.tsx       # 导出双语 Markdown / 排版对照 PDF
+│   │   ├── DualPdfPage.tsx     # BabelDOC 排版对照 PDF 视图（生成进度/排队）
 │   │   └── common/             # MarkdownText(KaTeX/中文斜体修正) / TranslatableImage(译制图)
 │   │                           # BlockTranslateButton(块级重译) / FormulaButton(公式识别)
-│   ├── stores/                 # Zustand：config / pdf(文档与块状态) / ui(主题·阅读模式)
-│   ├── hooks/                  # useOcr(流水线轮询) / useConfig / usePdfThumbnails
+│   │                           # TitleBar(页签/全局进度徽标) / ConfirmDialog
+│   ├── stores/                 # Zustand：config / pdf / ui / sessions(多会话) / babeldoc / library
+│   ├── hooks/                  # useOcr(流水线轮询) / useConfig / usePdfThumbnails / useLazyPage
 │   ├── lib/bridge.ts           # Tauri IPC ⇄ HTTP 双模桥接（浏览器模式复用全部 UI）
+│   ├── lib/translationManager.ts  # 翻译会话生命周期：启动/接管/轮询/入库路径切换
 │   ├── utils/export.ts         # 双语导出
 │   └── types/index.ts          # 前后端一致的数据结构（块/页/bbox/公式标记）
 ├── backend/                    # FastAPI 后端（内嵌 sidecar）
@@ -325,9 +364,15 @@ PDF-Reader/
 │   │   └── layout.py           # 块级 bbox 标注（多段消耗式匹配，原版模式数据基础）
 │   ├── ocr/
 │   │   ├── siliconflow.py      # 视觉 OCR 通道（整页 markdown，PaddleOCR-VL）
+│   │   ├── vlm_parse.py        # VLM 结构化解析：区域快照+遮罩→整页解析→双阈值交叉校验
+│   │   ├── layout_model.py     # DocLayout-YOLO 版面模型 provider（缓存/守卫/降级）
+│   │   ├── layout_worker.py    # 版面检测子进程入口（跑随包 BabelDOC 运行时）
 │   │   ├── textlayer.py        # 文本层提取：双栏重排/跨页合并/家具过滤/列感知
+│   │   ├── title_detect.py     # 标题几何检测（页0 最大字号+最靠上连续行）
 │   │   ├── figtranslate.py     # 图表区域检测/快照/表格结构化重建译制图
 │   │   └── formula.py          # 公式块按需识别（裁剪→VLM→LaTeX，块级缓存）
+│   ├── library.py              # 上传即入库（materialize：哈希去重/原子落盘）
+│   ├── docs_index.py           # 文档索引/文件夹管理（原子 JSON）
 │   ├── translate/
 │   │   ├── providers/openai_compat.py  # SiliconFlow/OpenAI 兼容翻译（批翻+减半重试+提示词版本）
 │   │   ├── glossary.py         # 术语表两遍法（全文翻译前抽术语注入提示词）
@@ -336,7 +381,7 @@ PDF-Reader/
 │   │   ├── babeldoc_export.py  # BabelDOC 导出：任务表/幂等缓存/取消/子进程泵
 │   │   └── babeldoc_worker.py  # 独立 venv 子进程：直调 BabelDOC API + 产物看门狗
 │   ├── cache/file_cache.py     # 内容寻址缓存（原子写/损坏兜底/版本熔断/统计）
-│   └── tests/                  # pytest 单测（91 项，全离线 mock）
+│   └── tests/                  # pytest 单测（250+ 项，全离线 mock）
 ├── src-tauri/                  # Rust 桌面壳（sidecar 管理、Tauri 命令、导出写盘）
 ├── scripts/                    # dev-start / build-backend / build-exe
 ├── config/                     # config.example.json 模板（真实 config 不入库）
@@ -350,14 +395,17 @@ PDF-Reader/
 
 | 版本 | 对应阶段 | 内容 | 状态 |
 |------|----------|------|------|
-| `v0.1.0` | Phase 0+1 | 主链路打通、OCR 重写、缓存、配置热更新、缩略图 | ✅ 已发布 |
-| `v0.2.0` | Phase 2 | provider 抽象、暗色模式、拖拽上传、导出双语 | ✅ 已发布 |
-| `v0.3.0` | Phase 3 | 测试+CI、LICENSE、配置模板、README 复刻指南、构建串联 | ✅ 已实现 |
-| `v0.4.0` | 阶段1 | 原文不全根治：双栏阅读序重排、跨页/跨栏段落合并、渐进呈现 | ✅ 开发完成 |
-| `v0.5.0` | 阶段2 | 翻译质量工程：术语表两遍法、公式占位符保护、回声/融合治理、块级重译 | ✅ 开发完成 |
-| `v0.6.0` | 阶段3 | 排版与公式：KaTeX 渲染、表格译制图、中文排版修正 | ✅ 开发完成 |
-| `v0.7.0` | 阶段5 | 原版对照渲染：pdfjs 原样渲染 + 多段 bbox 高亮 + 译文浮层；公式按需识别 | 🔶 待人工验收 |
-| `v0.8.0` | 候选池 | 文档库/首页（持久化文档索引 + "已翻译文章"列表）、缓存模块独立化 | 📝 已立项未排期 |
+| `v0.1.0`~`v0.3.0` | Phase 0~3 | 主链路、provider 抽象、测试+CI、LICENSE、构建串联 | ✅ 已发布 |
+| `v0.4.0`~`v0.6.0` | 阶段1~3 | 双栏重排/跨页合并、翻译质量工程、KaTeX/表格译制图 | ✅ 已发布 |
+| `v0.7.0` | 阶段5 | 原版对照渲染（pdfjs + 多段 bbox 高亮）、公式按需识别 | ✅ 已发布 |
+| `v0.8.0` | 阶段6 | 文献库与持久化统一（配置单源/文档索引/列表页秒开） | ✅ 已发布 |
+| `v0.9.0` | 阶段7 | 全模式缩放、原版对照页、模式选择器分组 | ✅ 已发布 |
+| `v0.10.0` | 阶段8 | 多会话阅读与后台翻译 | ✅ 已发布 |
+| `v0.11.0` | 阶段9 | BabelDOC 双语 PDF（随包运行时捆绑，开箱即用） | ✅ 已发布 |
+| `v0.12.0` | 阶段10 | 桌面沉浸化与自定义标题栏（阶段1~8 于 2026-09-11 批量验收） | ✅ 已发布 |
+| `v0.13.0` | 阶段11 | 性能与并发体验（渲染优化/翻译自动重接管） | ✅ 已发布 |
+| `v0.14.0` | 阶段12 | 识别引擎混合架构：VLM 结构化解析 + 版面模型信号源 + 上传即入库 | ✅ 已发布 |
+| `v0.14.1` | 验收修复 | 源文件缺失报错指引、文献删除（二次确认）、退出进程残留根治 | ✅ 已发布 |
 
 > 各阶段的设计决策、实现细节与踩坑记录见 [`docs/`](docs/) 下对应阶段文档；总体约束见 [`docs/开发总纲.md`](docs/开发总纲.md)；发版节奏见 [`docs/版本规划.md`](docs/版本规划.md)。
 
