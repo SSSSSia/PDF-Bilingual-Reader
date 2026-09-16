@@ -3,9 +3,18 @@
 import os
 import sys
 
+import pytest
+
 from export import babeldoc_export, babeldoc_runtime as rt
 
+# 随包运行时是 Windows embeddable 布局，检测函数在非 Windows 上恒返回 None，
+# 正向命中分支只能在 Windows 上验证
+_win_only = pytest.mark.skipif(
+    sys.platform != "win32", reason="随包运行时检测链仅 Windows 生效"
+)
 
+
+@_win_only
 def test_runtime_python_detection(tmp_path):
     assert rt.runtime_python(str(tmp_path)) is None
     exe = os.path.join(rt.runtime_dir(str(tmp_path)), "python.exe")
@@ -24,6 +33,7 @@ def test_installed_version(tmp_path):
     assert rt.installed_version(str(tmp_path)) == "babeldoc-0.6.4 py3.12"
 
 
+@_win_only
 def test_venv_python_chain_exe_adjacent(tmp_path, monkeypatch):
     """捆绑安装位：项目 venv 不存在时，回落到后端 exe 同级的 babeldoc-runtime/。"""
     monkeypatch.setattr(babeldoc_export, "_venv_python", lambda: None)
