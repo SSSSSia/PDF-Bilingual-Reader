@@ -74,7 +74,10 @@ Rust 壳 (src-tauri) ── reqwest ──► FastAPI 后端 (127.0.0.1:8000)
 
 到 [Releases](https://github.com/SSSSSia/PDF-Reader/releases) 下载安装包（MSI 或 NSIS exe，x64），安装后：
 
-1. 打开 设置 → 填入 SiliconFlow API Key（OCR 与翻译共用，在[官网](https://cloud.siliconflow.cn)注册时可填写邀请码 `H8b0vER1`即可领取额度）
+1. 打开 设置 → 填入 SiliconFlow API Key
+
+   > OCR 与翻译共用API，[硅基流动](https://cloud.siliconflow.cn)可以免费调用小参数模型，实测小模型翻译质量也很好，注册时可填写邀请码 `H8b0vER1`，注册成功会送16元的代金券，这代金券如果用前沿模型也能用好久了
+
 2. 「+ 添加文章」上传 PDF → 翻译自动开始，完成后进入阅读
 
 安装包已内置 Python 后端与 BabelDOC 运行时，**无需安装 Python 或任何依赖**；上传的 PDF 会自动复制进应用数据目录（`%APPDATA%/pdf-reader/files/`），此后原文件移动/删除均不影响阅读与导出。
