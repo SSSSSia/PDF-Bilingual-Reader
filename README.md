@@ -12,8 +12,8 @@
 - 📊 **图表处理**：图表区域检测与快照嵌入（caption 边界收夹防吞正文）；表格按需「译」按钮生成**译制图**（保留原排版，表内文字译成中文）
 - 🈯 **翻译质量工程**：术语表两遍法、批翻减半重试、回声/融合译文三层层层设防、块级手动重译、提示词版本化
 - 💾 **内容寻址缓存**：同一段文字/同一页提取/同一公式全局只算一次，重开文档秒出；版本号熔断让算法升级自动失效旧缓存
-- 🛠 桌面级体验：页面缩略图导航、暗色模式、拖拽上传、导出双语 Markdown / 排版对照 PDF、中文排版修正（斜体转粗体）、链接外部浏览器打开
-- ☁️ 全部走云端 API（OCR 与翻译均用 [SiliconFlow](https://siliconflow.cn)，免费额度即可），exe 不含任何模型权重
+- 🛠 桌面级体验：页面缩略图导航、暗色模式、拖拽上传、单实例守卫（重复启动自动聚焦已有窗口）、导出双语 Markdown / 排版对照 PDF、中文排版修正（斜体转粗体）、链接外部浏览器打开
+- ☁️ 全部走云端 API（OCR 与翻译均用 [SiliconFlow](https://siliconflow.cn)，免费额度即可），exe 不含任何模型权重（排版对照首次使用时在线下载约 50MB 版面权重）
 
 > 设计目标：**个人本地使用 + 开源可复刻**。配置一次 API Key 即可开箱阅读；他人 clone 后按本文档即可跑起来。
 
@@ -27,7 +27,7 @@
 | 前端 | React 18 + TypeScript 5 + Vite 5 + Tailwind CSS 3 + Zustand 4 |
 | 公式渲染 | remark-math + rehype-katex（KaTeX） |
 | 原版模式 | pdfjs-dist（canvas 逐页渲染 + 坐标 overlay） |
-| 后端 | FastAPI（Python 3.11+），以 Tauri **sidecar** 形式内嵌随 exe 分发 |
+| 后端 | FastAPI（Python 3.11+），以 Tauri **sidecar** 形式内嵌随安装包分发 |
 | PDF 解析 | PyMuPDF + pymupdf4llm（文本层优先，扫描页混合 OCR） |
 | 版面模型 | DocLayout-YOLO（随包 BabelDOC 运行时自带，独立子进程调用；标题/图表/噪音区域信号） |
 | OCR | SiliconFlow `PaddlePaddle/PaddleOCR-VL-1.5`（文档解析 VLM，整页/公式块/表格通用） |
@@ -76,11 +76,14 @@ Rust 壳 (src-tauri) ── reqwest ──► FastAPI 后端 (127.0.0.1:8000)
 
 1. 打开 设置 → 填入 SiliconFlow API Key
 
-   > OCR 与翻译共用API，[硅基流动](https://cloud.siliconflow.cn)可以免费调用小参数模型，实测小模型翻译质量也很好，注册时可填写邀请码 `H8b0vER1`，注册成功会送16元的代金券，这代金券如果用前沿模型也能用好久了
+   > OCR 与翻译共用 API，[硅基流动](https://cloud.siliconflow.cn) 的免费小参数模型即可满足日常使用，实测翻译质量也不错。注册时可自愿填写邀请码 `H8b0vER1`（注册成功送 16 元代金券，用于前沿模型也能用挺久）。
 
 2. 「+ 添加文章」上传 PDF → 翻译自动开始，完成后进入阅读
 
 安装包已内置 Python 后端与 BabelDOC 运行时，**无需安装 Python 或任何依赖**；上传的 PDF 会自动复制进应用数据目录（`%APPDATA%/pdf-reader/files/`），此后原文件移动/删除均不影响阅读与导出。
+
+- **升级**：直接下载新版覆盖安装即可，文献库、翻译缓存与配置全部保留（建议安装前先关闭旧版本）。升级后的第一次启动，杀毒软件会扫描新落盘的文件，可能多等几秒，属一次性现象。
+- **单实例**：重复双击图标不会开出第二个窗口，会自动聚焦已打开的窗口。
 
 ---
 
@@ -165,16 +168,16 @@ npm run dev
     "api_key": "<你的 SiliconFlow Key>",
     "api_url": "https://api.siliconflow.cn/v1",
     "model": "deepseek-ai/DeepSeek-V4-Flash",   // 任意 OpenAI 兼容对话模型
-    "target_language": "en",                     // 译文语言
-    "source_language": "zh"                      // 原文语言
+    "target_language": "zh",                     // 译文语言
+    "source_language": "en"                      // 原文语言
   },
   "ui": { "default_mode": "bilingual", "theme": "light" }
 }
 ```
 
-> OCR 与翻译使用同一家的免费模型，填同一个 Key 即可。英文论文译中文请把方向改为 `source_language: "en"`、`target_language: "zh"`。改完配置**无需重启**后端（配置按文件修改时间热重载），也可在设置页点「测试连接」验证。
+> OCR 与翻译使用同一家的免费模型，填同一个 Key 即可。示例默认按**英文论文 → 中文**配置（与 `config/config.example.json` 一致），方向相反请对调 `source_language` / `target_language`。改完配置**无需重启**后端（配置按文件修改时间热重载），也可在设置页点「测试连接」验证。
 
-### 数据与缓存目录（阶段6-T4 统一声明）
+### 数据与缓存目录
 
 所有持久化数据收敛在**同一个用户数据目录**：`config.json` 所在目录即数据根，
 后端启动日志会打印实际生效目录（`数据目录: ...`）。
@@ -272,7 +275,7 @@ npm run dev
 
 ---
 
-## 打包发布（自包含 exe）
+## 打包发布（自包含安装包）
 
 打包前**必须先**把 Python 后端编译为 Tauri sidecar，再 `tauri build` 一并打入：
 
@@ -289,12 +292,11 @@ powershell -ExecutionPolicy Bypass -File scripts/build-exe.ps1
 powershell -ExecutionPolicy Bypass -File scripts/build-backend.ps1
 ```
 
-### BabelDOC 运行时（随包捆绑，阶段9-T6）
+### BabelDOC 运行时（随包捆绑）
 
-排版对照由 BabelDOC 独立引擎驱动（venv 662MB，babeldoc 0.6.4 锁版本，
-python-3.12 embeddable 自包含）。2026-09-12 用户决策**直接捆绑**——目标用户
-非技术向、不在意体积，随包分发最可控（安装包 ~72MB→约 400MB，安装后 +660MB），
-无任何下载/安装步骤。
+排版对照由 BabelDOC 独立引擎驱动（babeldoc 0.6.4 锁版本，python-3.12
+embeddable 自包含，解压后约 660MB）。运行时**直接随安装包捆绑**，无任何
+下载/安装步骤；代价是安装包较大——NSIS 约 183MB / MSI 约 269MB。
 
 `build-exe.ps1` 已自动串起运行时暂存（`build-babeldoc-runtime.ps1`：
 下载 embeddable python ~11MB + 拷贝 site-packages + `._pth` 启用 site +
@@ -348,7 +350,6 @@ PDF-Reader/
 │   │   ├── OriginalReader.tsx  # 原版对照模式（pdfjs 渲染 + 多段 bbox overlay + 译文浮层）
 │   │   ├── ReaderToolbar.tsx   # 模式切换 / 缩放工具栏
 │   │   ├── ConfigPage.tsx      # 设置页
-│   │   ├── ExportBar.tsx       # 导出双语 Markdown / TXT
 │   │   ├── ExportBar.tsx       # 导出双语 Markdown / 排版对照 PDF
 │   │   ├── DualPdfPage.tsx     # BabelDOC 排版对照 PDF 视图（生成进度/排队）
 │   │   └── common/             # MarkdownText(KaTeX/中文斜体修正) / TranslatableImage(译制图)
@@ -387,9 +388,9 @@ PDF-Reader/
 │   ├── cache/file_cache.py     # 内容寻址缓存（原子写/损坏兜底/版本熔断/统计）
 │   └── tests/                  # pytest 单测（250+ 项，全离线 mock）
 ├── src-tauri/                  # Rust 桌面壳（sidecar 管理、Tauri 命令、导出写盘）
-├── scripts/                    # dev-start / build-backend / build-exe
+├── scripts/                    # dev-start / build-backend / build-babeldoc-runtime / build-exe
 ├── config/                     # config.example.json 模板（真实 config 不入库）
-├── docs/                       # 开发总纲（单一事实来源）、版本规划、阶段1~5 文档
+├── docs/                       # 开发总纲（单一事实来源）、版本规划、阶段1~12 文档
 └── .github/workflows/ci.yml
 ```
 
@@ -410,6 +411,8 @@ PDF-Reader/
 | `v0.13.0` | 阶段11 | 性能与并发体验（渲染优化/翻译自动重接管） | ✅ 已发布 |
 | `v0.14.0` | 阶段12 | 识别引擎混合架构：VLM 结构化解析 + 版面模型信号源 + 上传即入库 | ✅ 已发布 |
 | `v0.14.1` | 验收修复 | 源文件缺失报错指引、文献删除（二次确认）、退出进程残留根治 | ✅ 已发布 |
+| `v0.14.2` | 验收修复 | 重开误报「提取缓存已失效」根治（入库修复 + 缺页数记录自动自愈）、重提取后必定跳转 | ✅ 已发布 |
+| `v0.14.3` | 体验优化 | 内嵌后端 onefile→onedir（启动稳定 1~3 秒）、单实例守卫 | ✅ 已发布 |
 
 > 各阶段的设计决策、实现细节与踩坑记录见 [`docs/`](docs/) 下对应阶段文档；总体约束见 [`docs/开发总纲.md`](docs/开发总纲.md)；发版节奏见 [`docs/版本规划.md`](docs/版本规划.md)。
 
@@ -421,19 +424,19 @@ PDF-Reader/
 
 | 组件 | 许可证 | 版本 | 集成方式 |
 |------|--------|------|----------|
-| [BabelDOC](https://github.com/funstory-ai/BabelDOC) | **AGPL-3.0** | `0.6.4`（版本锁定） | 作为**独立子进程**调用（独立 venv 内运行其 Python API），不链接、不修改、不分发其源码 |
+| [BabelDOC](https://github.com/funstory-ai/BabelDOC) | **AGPL-3.0** | `0.6.4`（版本锁定） | **未修改**，随安装包捆绑其独立运行环境（独立 venv），以**独立子进程**调用其 Python API；不链接、不修改其代码 |
 
 说明：
 
-- 「原版PDF·左右对照」（排版对照导出）功能由 BabelDOC 提供，其版权归 funstory-ai 及
-  BabelDOC 项目原作者所有；应用内置的模型 [DocLayout-YOLO-DocStructBench-onnx](https://github.com/opendatalab/DocLayout-YOLO)
+- 「原版PDF·左右对照」（排版对照）功能由 BabelDOC 提供，其版权归 funstory-ai 及
+  BabelDOC 项目原作者所有；随包运行时内置的模型
+  [DocLayout-YOLO-DocStructBench-onnx](https://github.com/opendatalab/DocLayout-YOLO)
   权重署名与许可声明予以保留。
-- **重排版三模式的版面结构信号**（标题层级/图表区域/版权噪音判定，2026-09 阶段12-T9）
-  同样经**独立子进程**调用随包 BabelDOC 运行时内的 DocLayout-YOLO（AGPL-3.0）——
-  与导出功能同一条进程隔离边界（不链接、不修改其源码），运行时缺失时自动降级为
-  本地字号几何证据，功能不失效。
-- 本应用定位为本地工具，不分发 BabelDOC 本体；用户在安装/使用该功能时由应用引导
-  自行获取，AGPL 合规边界与上述集成方式一致。
+- **重排版三模式的版面结构信号**（标题层级/图表区域/版权噪音判定）同样经**独立子进程**
+  调用随包 BabelDOC 运行时内的 DocLayout-YOLO（AGPL-3.0）——与排版对照功能同一条
+  进程隔离边界（不链接、不修改），运行时缺失时自动降级为本地字号几何证据，功能不失效。
+- BabelDOC 采用 AGPL-3.0 许可，完整源码可在其[上游仓库](https://github.com/funstory-ai/BabelDOC)
+  获取；本应用锁定 `0.6.4` 且未做任何修改。
 - 其余依赖（FastAPI、PyMuPDF、React 等均为 MIT/BSD/Apache 系许可）详见
   `requirements.txt` 与 `package.json`。
 
