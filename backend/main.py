@@ -527,10 +527,26 @@ async def api_open_doc(payload: dict):
     doc = docs_index.get_doc(settings.data_dir, doc_id) if doc_id else None
     if not doc:
         raise HTTPException(status_code=404, detail="文档索引中不存在该记录")
+    page_count = int(doc.get("page_count") or 0)
+    if not page_count:
+        # 自愈：索引记录缺页数（历史版本完成钩子写失败的半条记录）→
+        # 从库内副本读真实页数重建；成功后回写修复记录，卡片元信息随之恢复
+        fp = doc.get("file_path") or ""
+        if fp and os.path.isfile(fp):
+            try:
+                import pymupdf
+
+                with pymupdf.open(fp) as pdf:
+                    page_count = len(pdf)
+                doc = {**doc, "page_count": page_count, "status": "done"}
+                docs_index.upsert_doc(settings.data_dir, doc)
+                logger.info("重开时修复缺页数记录 doc_id=%s page_count=%d", doc_id, page_count)
+            except Exception:
+                logger.warning("修复缺页数记录失败 doc_id=%s", doc_id, exc_info=True)
     try:
         result = await processor.open_cached_doc(
             doc.get("pdf_hash", ""),
-            int(doc.get("page_count") or 0),
+            page_count,
             doc.get("file_path") or "",
         )
     except ValueError as e:

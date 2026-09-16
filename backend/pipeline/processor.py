@@ -211,7 +211,7 @@ async def run_pipeline(file_path: str, display_name: str | None = None) -> dict:
         },
     }
 
-    asyncio.create_task(_process_pipeline(file_path, job_id, pdf_hash))
+    asyncio.create_task(_process_pipeline(file_path, job_id, pdf_hash, display_name))
 
     # 扩展：上传即入库——此前翻译完成才登记，
     # 进行中的文档在文献库"消失"（F5/关开应用后无从发现）。早期登记的
@@ -681,7 +681,9 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
     return result
 
 
-async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
+async def _process_pipeline(
+    file_path: str, job_id: str, pdf_hash: str, display_name: str | None = None
+):
     job = _jobs[job_id]
     stats = job["stats"]
     try:
@@ -1078,8 +1080,8 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                     # 想改名就改文件名。提取的 doc_title 只用于术语表提示词
                     # 与页眉剔除，不再决定卡片标题。
                     "title": os.path.splitext(
-                    os.path.basename(display_name or file_path)
-                )[0],
+                        os.path.basename(display_name or file_path)
+                    )[0],
                     "file_path": os.path.abspath(file_path),
                     "pdf_hash": pdf_hash,
                     "page_count": len(pages),

@@ -35,7 +35,7 @@ import LoadingSpinner from "./common/LoadingSpinner";
 
 export default function MainPage() {
   const { folderId } = useParams();
-  const { pages, isLoading, error, setError } = usePdfStore();
+  const { pages, isLoading, error, result, setError } = usePdfStore();
   const { mode } = useUiStore();
   const { docs, folders, loaded, fetchAll, moveDoc, deleteDoc } =
     useLibraryStore();
@@ -104,11 +104,15 @@ export default function MainPage() {
   // 仅「本页挂载时 pages 为空 → 变就绪」才触发：用户翻译途中主动回到
   // 文献库（挂载时已就绪）不会被弹回阅读页。
   const pagesWereEmptyRef = useRef(pages.length === 0);
+  // extractReady 含「已 done」分支：缓存全命中的重提取秒级完成，首轮 poll
+  // 即 done（isLoading 已置 false、无 running 态会话），只认 running 会错过
+  // 跳转窗口（2026-09-16 用户实测重提取不跳转）
   const extractReady =
-    !!runningJob && (runningJob.job?.progress ?? 0) >= EXTRACT_DONE;
+    (!!runningJob && (runningJob.job?.progress ?? 0) >= EXTRACT_DONE) ||
+    !!result;
   useEffect(() => {
     if (
-      isLoading &&
+      (isLoading || result) &&
       extractReady &&
       pages.length > 0 &&
       pagesWereEmptyRef.current &&
@@ -117,7 +121,7 @@ export default function MainPage() {
       navigatedRef.current = true;
       navigate(mode === "inline" ? "/reader/inline" : "/reader/bilingual");
     }
-  }, [isLoading, extractReady, pages, mode, navigate]);
+  }, [isLoading, result, extractReady, pages, mode, navigate]);
 
   // Tauri 环境下监听 OS 文件拖拽（整页生效；HTML5 drop 在 Tauri 中会被拦截）
   useEffect(() => {
