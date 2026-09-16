@@ -1,16 +1,16 @@
-r"""版面检测信号源接入层（阶段12-T9.1）。
+r"""版面检测信号源接入层。
 
 DocLayout-YOLO 经随包 BabelDOC 运行时子进程推理（layout_worker.py），
 主后端只消费 NDJSON 区域 JSON——onnxruntime 永不进主后端 venv（打包
-段错误事故防复发，2026-09-13）。区域按页缓存（伪模型名 doclayout-v1，
+段错误事故防复发）。区域按页缓存（伪模型名 doclayout-v1，
 ocr_key 内容寻址），回归重放/重开文档零成本。
 
 区域 schema（PDF 点坐标）：
     {"label": "title"|"abandon"|"table"|..., "conf": 0.0~1.0,
      "bbox": [x0, y0, x1, y1]}
 
-失败语义（T9.4 兜底的入口）：运行时缺失 / worker 崩溃 / 停止输出 →
-regions() 对该页恒返回 None，调用方（vlm_parse）自动落回字号证据——
+失败语义（兜底的入口）：运行时缺失 / worker 崩溃 / 停止输出 →
+regions 对该页恒返回 None，调用方（vlm_parse）自动落回字号证据——
 版面模型是结构增强信号，不是管线依赖，任何失败都不阻断提取。
 """
 import asyncio
@@ -27,11 +27,11 @@ LAYOUT_CACHE_MODEL = "doclayout-v1"
 # 静默即挂死——首行前的模型加载 ~3s + 偶发权重下载，150s 足够宽。
 LINE_SILENCE_TIMEOUT = 150.0
 
-# ── 区域去重（阶段12-T9.3，纯几何规则）─────────────────────────────
+# ── 区域去重─────────────────────────────
 # 决策文档 §2 已知边界：模型偶发对同一区域复检两次（其一置信 0.3~0.6）；
 # "Algorithm 1" 伪代码框被判低置信 table（实测 0.26~0.42）。
-# 下限取 0.5 而非任务草案的 0.6——2026-09-14 worker 真实链路冒烟实测：
-# FG-RAG p3 第三张无框表最高置信 0.56（与 0.38 复检框同 bbox），0.6 硬下限
+# 下限取 0.5 而非任务草案的 0.6——worker 真实链路冒烟实测：
+# 第三张无框表最高置信 0.56（与 0.38 复检框同 bbox），0.6 硬下限
 # 会把它整体滤掉，违反验收标准 1「三张无框表以快照呈现」；而 Algorithm
 # 框 ≤0.42，0.5 恰落在实测空档 (0.42, 0.56] 内——滤伪代码框、保无框表。
 # 同 label IoU>0.6 只保留置信最高者；跨 label 不判重（消费端分通道
@@ -83,9 +83,9 @@ class LayoutProvider:
         provider = LayoutProvider(file_path, pdf_hash, cache_dir, data_dir)
         await provider.start([0, 1, 2, ...])   # 缓存优先，缺页起 worker
         regions = await provider.regions(pno)  # list[dict] | None
-        await provider.close()                 # 任务结束/异常时回收
+        await provider.close                 # 任务结束/异常时回收
 
-    start() 幂等；regions() 对未请求的页返回 None。子进程产出经
+    start 幂等；regions 对未请求的页返回 None。子进程产出经
     test 注入位 _spawn 替换（生产为 asyncio.create_subprocess_exec）。
     """
 
@@ -190,7 +190,7 @@ class LayoutProvider:
                     return
                 if not raw:
                     if self._closing:
-                        return  # close() 主动杀进程导致的 EOF，不算失败
+                        return  # close 主动杀进程导致的 EOF，不算失败
                     # EOF 且未收到 done：worker 中途退出
                     self._fail(f"worker 提前退出（returncode={self._proc.returncode}）")
                     return
@@ -226,7 +226,7 @@ class LayoutProvider:
                 if not self._futures[pno].done():
                     self._futures[pno].set_result(regions)
         finally:
-            # 先摘除自身引用再 close，防 close() 对当前任务 cancel/await
+            # 先摘除自身引用再 close，防 close 对当前任务 cancel/await
             self._reader = None
             await self.close()
 
@@ -266,7 +266,7 @@ class LayoutProvider:
     # ── 消费接口 ────────────────────────────────────────────────────
 
     async def regions(self, page: int) -> list[dict] | None:
-        """该页版面区域（T9.3 去重后）；未请求/无产出/失败 → None（走兜底）。
+        """该页版面区域（去重后）；未请求/无产出/失败 → None（走兜底）。
 
         去重放在读取口而非写入口：缓存保持模型原始产出，去重规则升级
         无需失效区域缓存，且缓存命中的旧条目同样被覆盖。"""

@@ -1,4 +1,4 @@
-"""阶段12-T4：_load_or_run_ocr 管线接入测试（mock VLM，不真调 API）。
+"""_load_or_run_ocr 管线接入测试（mock VLM，不真调 API）。
 
 覆盖：VLM 主路线挂载与 stats/缓存记录、vlm.enabled=false 整体回退
 旧文本层路径、最终产物缓存命中秒挂、扫描页占位后走视觉通道。

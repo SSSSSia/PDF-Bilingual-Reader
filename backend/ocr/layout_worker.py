@@ -1,4 +1,4 @@
-r"""版面检测 worker（阶段12-T9.1）——只被随包 BabelDOC 运行时执行。
+r"""版面检测 worker——只被随包 BabelDOC 运行时执行。
 
 主后端 ocr.layout_model.LayoutProvider 以子进程启动本脚本：
     <babeldoc-runtime-python> layout_worker.py <pdf路径> <页号,页号,...>
@@ -16,7 +16,7 @@ stdout 逐行 NDJSON（每行 flush，供主后端逐页流式消费）：
 - stderr 自由文本（onnx 权重下载进度等），主后端只转发不打断。
 
 **严禁在主后端 venv import 本文件的依赖**（babeldoc/onnxruntime/numpy
-三件套）——onnxruntime 曾在冻结环境触发打包段错误事故（2026-09-13，
+三件套）——onnxruntime 曾在冻结环境触发打包段错误事故（
 重构路线图 §4.1），这是它独立成 worker 脚本的原因。
 """
 import json

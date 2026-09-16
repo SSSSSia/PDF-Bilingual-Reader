@@ -5,7 +5,7 @@ import { useConfigStore } from "../stores/configStore";
 import { openFileDialog, uploadFile, isTauri } from "../lib/bridge";
 
 /**
- * 添加文章页（2026-09-09 靠岸学术风格改版；阶段8 多会话改造）：
+ * 添加文章页：
  * 大标题 + 卡片内虚线拖拽区。选择文件后交给 translationManager 后台翻译
  * （轮询不再依赖本页组件生命周期），成功立即返回文档库——进度内联显示，
  * 不占用阅读会话，翻译途中可自由打开其他文献。
@@ -17,7 +17,7 @@ export default function AddArticlePage() {
 
   // 交给 translationManager 启动后台翻译：成功 → 返回文档库看进度；
   // 失败（如已有任务进行中）→ 留在本页提示原因。
-  // 无 Key 前置拦截（2026-09-09）：未配置直接提示并引导去设置，不发无效任务
+  // 无 Key 前置拦截：未配置直接提示并引导去设置，不发无效任务
   const handleFile = async (path: string) => {
     const { configLoaded, isConfigured } = useConfigStore.getState();
     if (configLoaded && !isConfigured) {

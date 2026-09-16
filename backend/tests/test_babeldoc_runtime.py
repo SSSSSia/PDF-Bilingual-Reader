@@ -1,4 +1,4 @@
-"""babeldoc_runtime 单元测试（阶段9-T6 直接捆绑）：检测链各分支。"""
+"""babeldoc_runtime 单元测试：检测链各分支。"""
 
 import os
 import sys
@@ -55,9 +55,9 @@ def test_venv_python_chain_exe_adjacent(tmp_path, monkeypatch):
 
 
 def test_start_export_no_local_shadowing_crash(tmp_path, monkeypatch):
-    """回归（2026-09-15 T10 首次实测导出发现）：T6 重构把运行时解析结果赋给
+    """回归：重构把运行时解析结果赋给
     与模块级函数同名的局部变量 venv_python——同名赋值令函数内该名字整体
-    局部化，调用即 UnboundLocalError，2026-09-12 起导出启动恒 500。
+    局部化，调用即 UnboundLocalError，起导出启动恒 500。
     断言 start_export 能走过运行时解析段（拿到 job 结构而非裸异常），
     且解析出的 python 进入 worker argv[0]。"""
     import asyncio

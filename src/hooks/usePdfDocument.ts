@@ -7,7 +7,7 @@ import { convertFileSrc } from "../lib/bridge";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /**
- * 加载 PDF 文档（阶段7-T4 自 OriginalReader 抽出，原版两种形态共用）。
+ * 加载 PDF 文档。
  * 桥接层双模：Tauri convertFileSrc / 浏览器 /api/file/raw。
  *
  * pdfjs 6 破坏性变更：getDocument 只收 DocumentInitParameters 对象，

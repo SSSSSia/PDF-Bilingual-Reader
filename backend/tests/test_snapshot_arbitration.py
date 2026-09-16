@@ -1,15 +1,15 @@
-"""快照区域版面仲裁回归测试（阶段12-T10 反馈 2，2026-09-15）。
+"""快照区域版面仲裁回归测试。
 
-用户验收反馈：新上传论文（SubgraphRAG，ICLR 版式）公式/表格/图片识别
+用户验收反馈：新上传论文（ICLR 版式）公式/表格/图片识别
 处理很差。根因：附录 prompt 示例框（带矢量边框的纯文本块）被
 cluster_drawings 当图表候选 → 整块快照 → truth 扣空（交叉校验失明，
-p25-29 truth 仅 48 字符）+ 遮罩搅乱 VLM（p5 bag 0.64 降级）+ 降级路径
-redact 挖空文本层（产物仅 200 字符）。DALK p17/p18 附录同款潜伏 bug。
+p25-29 truth 仅 48 字符） + 遮罩搅乱 VLM（p5 bag 0.64 降级） + 降级路径
+redact 挖空文本层（产物仅 200 字符）。/p18 附录同款潜伏 bug。
 
 修法（协议第 9 条：信号源优先）：版面模型 plain text 区域仲裁最终快照
 区域——区域内文本字符被 plain text 区域覆盖 ≥50%（块主体口径）且内部
 文本 ≥200 字符即否决。实测全语料分离度：真图真表 ≤14%、prompt 框
-≥60%（SubgraphRAG p5 = 0.596），0.5 落空档中点。
+≥60%（= 0.596），0.5 落空档中点。
 """
 
 import pymupdf
@@ -39,8 +39,8 @@ def test_boxed_text_kept_without_layout_signal():
 
 
 def test_boxed_text_vetoed_by_plain_text_regions():
-    """版面模型判 plain text 的区域覆盖框内正文 → 快照否决（SubgraphRAG
-    p22-29/DALK p17-18 实测形态）。"""
+    """版面模型判 plain text 的区域覆盖框内正文 → 快照否决（
+    p22-29/）。"""
     page = _boxed_page()
     figs = _figure_regions(
         page, text_regions=[pymupdf.Rect(100, 100, 500, 400)]
@@ -50,7 +50,7 @@ def test_boxed_text_vetoed_by_plain_text_regions():
 
 def test_uncovered_region_survives_arbitration():
     """plain text 区域不覆盖（真图/真表形态——内部文本不在任何正文区域内）
-    → 快照保留（FG-RAG 无框表 0.56/DALK 表群回归口径）。"""
+    → 快照保留（无框表 0.56/表群回归口径）。"""
     page = _boxed_page()
     figs = _figure_regions(
         page, text_regions=[pymupdf.Rect(0, 600, 612, 792)]
@@ -67,7 +67,7 @@ def test_small_text_region_below_floor_survives():
     assert len(figs) == 1
 
 
-# ── 注释边界收夹（阶段12-T10 反馈 7，2026-09-15）────────────────────
+# ── 注释边界收夹────────────────────
 
 def _figure_page_with_caption():
     """页面上部一个矢量图（矩形），下方紧跟 Figure 注释行 + 正文段。"""
@@ -81,7 +81,7 @@ def _figure_page_with_caption():
 
 def test_caption_clamp_releases_caption_and_body():
     """图注被卷进快照 → 底边收到注释上方：注释与其后正文留在文本流
-    （SubgraphRAG p2 实测形态：注释被遮罩 → 图甩页尾、注释未翻译）。"""
+    （注释被遮罩 → 图甩页尾、注释未翻译）。"""
     page = _figure_page_with_caption()
     figs = _figure_regions(page)
     assert len(figs) == 1
@@ -93,7 +93,7 @@ def test_caption_clamp_releases_caption_and_body():
 
 def test_caption_clamp_guard_protects_model_regions():
     """守卫：收夹会切断模型 figure/table 区域主体 → 放弃收夹维持现状
-    （DALK p8 跨栏合并大块实测：图注下方还有另一栏的表，切了就丢表）。"""
+    （跨栏合并大块实测：图注下方还有另一栏的表，切了就丢表）。"""
     page = _figure_page_with_caption()
     # 右下角再造一个"模型 table 区域"，横跨注释下沿——收夹会切到它
     model_tab = pymupdf.Rect(320, 310, 560, 420)

@@ -25,7 +25,7 @@ import type { DocMeta } from "../types";
 import LoadingSpinner from "./common/LoadingSpinner";
 
 /**
- * 文献库（主页 + 文件夹视图，2026-09-09 靠岸学术风格一比一复刻）：
+ * 文献库：
  * - 左侧边栏（Layout/Sidebar）负责导航与文件夹分组，本页负责网格内容；
  * - /folder/:folderId 进入文件夹视图（标题为文件夹名，仅显示归档文献）；
  * - 卡片：小尺寸居中首页缩略图 + 两行标题 + 元信息，hover 出「⋯」移动菜单；
@@ -39,15 +39,15 @@ export default function MainPage() {
   const { mode } = useUiStore();
   const { docs, folders, loaded, fetchAll, moveDoc } = useLibraryStore();
   const sessions = useSessionsStore((s) => s.sessions);
-  // 进行中的翻译任务（后台轮询，阶段8）：与"当前活跃阅读会话"解耦
+  // 进行中的翻译任务：与"当前活跃阅读会话"解耦
   const runningJob = sessions.find((s) => s.job?.status === "running");
   const navigate = useNavigate();
   const [isDragging, setIsDragging] = useState(false);
-  // 阶段1-T2：跳转时机由「全部翻译完成」提前到「pages 就绪（OCR 完成）」。
+  // 跳转时机由「全部翻译完成」提前到「pages 就绪（OCR 完成）」。
   // 用 ref 保证同一文件只跳一次；处理新文件时重置。
   const navigatedRef = useRef(false);
   const [openingId, setOpeningId] = useState<string | null>(null);
-  // 阶段11-T5 扩展：打开文献时发现后端仍在翻译 → 提示接管
+  // 扩展：打开文献时发现后端仍在翻译 → 提示接管
   const [attachPrompt, setAttachPrompt] = useState<{
     jobId: string;
     filePath: string;
@@ -56,12 +56,12 @@ export default function MainPage() {
     doc: DocMeta;
   } | null>(null);
   // 打开文献遇「提取缓存已不存在」（TEXT_LAYER_MODEL 版本熔断/缓存清空）
-  // → 确认后重新提取并复用译文缓存（2026-09-12：v17 升级后点卡片死路）
+  // → 确认后重新提取并复用译文缓存
   const [reextract, setReextract] = useState<{ doc: DocMeta } | null>(null);
   const [query, setQuery] = useState("");
   // 「移动到文件夹」菜单当前展开的文档（null = 关闭）
   const [menuDoc, setMenuDoc] = useState<DocMeta | null>(null);
-  // 行内重命名（2026-09-13 用户反馈：文章名字没法改）——卡片标题变输入框
+  // 行内重命名——卡片标题变输入框
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -94,12 +94,12 @@ export default function MainPage() {
     }
   };
 
-  // 自动跳转时机（2026-09-11 用户反馈：原「pages 首次非空」跳太早——后端
+  // 自动跳转时机（实测反馈：原「pages 首次非空」跳太早——后端
   // 逐页提取，多页文档首次 page 就绪仅 progress≈8-10，落进阅读页时原文
   // 还在一页页长、布局持续跳动）。改为等提取阶段完成（progress≥EXTRACT_DONE，
   // 原文排版定型）才进入；此后译文仍逐段流入，边译边读不变。
   // 仅「本页挂载时 pages 为空 → 变就绪」才触发：用户翻译途中主动回到
-  // 文献库（挂载时已就绪）不会被弹回阅读页（2026-09-09 用户反馈）。
+  // 文献库（挂载时已就绪）不会被弹回阅读页。
   const pagesWereEmptyRef = useRef(pages.length === 0);
   const extractReady =
     !!runningJob && (runningJob.job?.progress ?? 0) >= EXTRACT_DONE;
@@ -152,7 +152,7 @@ export default function MainPage() {
     if (!selected.toLowerCase().endsWith(".pdf")) {
       return;
     }
-    // 无 Key 前置拦截（2026-09-09）：configLoaded 三态防启动误报，
+    // 无 Key 前置拦截：configLoaded 三态防启动误报，
     // 后端 run_pipeline 入口也会 fail-fast，这里省一次无效上传。
     // 错误文案含"API Key"→ 下方错误卡自动出现"前往设置"引导按钮。
     const { configLoaded, isConfigured } = useConfigStore.getState();
@@ -160,7 +160,7 @@ export default function MainPage() {
       setError("请先在设置中配置 API Key，再添加文章");
       return;
     }
-    // 阶段8：同一时间仅 1 个翻译任务（后端支持并发，先按当前需求收口）；
+    // 同一时间仅 1 个翻译任务（后端支持并发，先按当前需求收口）；
     // 翻译不再占用阅读会话——进行中可自由打开其他文献
     if (currentTranslationKey()) {
       setError("已有翻译任务进行中，请等待完成后再添加新任务");
@@ -193,8 +193,8 @@ export default function MainPage() {
     if (path) await handlePath(path);
   };
 
-  /** 点击进度卡进入翻译会话（阶段8）：若当前活跃会话不是这一篇，
-   *  先快照停靠当前会话并换入翻译会话，再导航——不打断正在读的文献。 */
+  /** 点击进度卡进入翻译会话：若当前活跃会话不是这一篇，
+   * 先快照停靠当前会话并换入翻译会话，再导航——不打断正在读的文献。 */
   const handleProgressClick = () => {
     if (!runningJob) return;
     // 提取未完成（原文未排版定型）时进入只会看到不完整空页，禁止
@@ -206,8 +206,8 @@ export default function MainPage() {
     navigate(mode === "inline" ? "/reader/inline" : "/reader/bilingual");
   };
 
-  /** 打开已翻译文章（阶段8 多会话）：已有页签直接激活；否则停靠当前会话
-   *  → 缓存重建秒开 → 注册新会话。翻译进行中不再互斥（轮询已后台化）。 */
+  /** 打开已翻译文章：已有页签直接激活；否则停靠当前会话
+   * → 缓存重建秒开 → 注册新会话。翻译进行中不再互斥（轮询已后台化）。 */
   const handleOpenDoc = async (
     doc: DocMeta,
     opts?: { skipAttachCheck?: boolean },
@@ -230,7 +230,7 @@ export default function MainPage() {
     setOpeningId(doc.doc_id);
     setMenuDoc(null);
     setError(null);
-    // 阶段11-T5 扩展：该文档的翻译仍在后端运行（上传后 F5/关开应用场景）
+    // 扩展：该文档的翻译仍在后端运行（上传后 F5/关开应用场景）
     // → 提示接管继续，而非按"已完成"打开（此刻缓存只有部分页）
     if (!opts?.skipAttachCheck) {
       const running = await listRunningTranslations().catch(() => []);
@@ -329,6 +329,7 @@ export default function MainPage() {
       onDrop={handleDrop}
     >
       {/* 整页拖入提示层（有文献时拖拽反馈；空状态由大拖拽区自行高亮） */}
+
       {isDragging && hasDocs && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/80 dark:border-blue-400 dark:bg-blue-900/30">
           <p className="text-sm font-medium text-blue-600 dark:text-blue-300">
@@ -338,6 +339,7 @@ export default function MainPage() {
       )}
 
       {/* 页头：标题 + 添加文章按钮 */}
+
       <header className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           {currentFolder ? currentFolder.name : "文献库"}
@@ -362,6 +364,7 @@ export default function MainPage() {
       </header>
 
       {/* 空状态：整块拖拽上传区作主视觉（入口不丢弃）；文件夹不存在单独提示 */}
+
       {loaded && folderId && !currentFolder && (
         <p className="mt-10 text-center text-sm text-slate-500 dark:text-slate-400">
           该文件夹不存在或已被删除。
@@ -422,6 +425,7 @@ export default function MainPage() {
       )}
 
       {/* 计数 + 搜索行：有文献，或文件夹视图（空文件夹也显示，避免整页空白） */}
+
       {(hasDocs || (loaded && currentFolder)) && (
         <div className="mt-5 flex items-center justify-between gap-4">
           <p className="shrink-0 text-sm text-slate-500 dark:text-slate-400">
@@ -453,7 +457,7 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* 翻译进行中：内联进度卡（阶段8 后台轮询驱动，与活跃阅读会话解耦；
+      {/* 翻译进行中：内联进度卡（后台轮询驱动，与活跃阅读会话解耦；
           提取完成（progress≥30，原文排版定型）后才可点击进入阅读页） */}
       {runningJob && runningJob.job && (
         <div
@@ -514,11 +518,13 @@ export default function MainPage() {
       )}
 
       {/* 文献网格：小尺寸居中首页缩略图卡片（3 列） */}
+
       {hasDocs && filtered.length > 0 && (
         <ul className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((d) => (
             <li key={d.doc_id} className="group relative">
               {/* 卡片主体（div+role：内部还要放「⋯」按钮，避免 button 嵌套） */}
+
               <div
                 role="button"
                 tabIndex={0}
@@ -539,6 +545,7 @@ export default function MainPage() {
                 }`}
               >
                 {/* 缩略图：小尺寸居中（白边留白），不再整卡满铺 */}
+
                 <div className="flex h-44 items-center justify-center overflow-hidden rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
                   {thumbs[d.doc_id] ? (
                     <img
@@ -568,7 +575,8 @@ export default function MainPage() {
                     </div>
                   )}
                 </div>
-                {/* 标题（两行截断）+ 元信息；行内重命名态切换为输入框 */}
+                {/* 标题（两行截断） + 元信息；行内重命名态切换为输入框 */}
+
                 <div className="px-1 pb-1 pt-2.5">
                   {renamingId === d.doc_id ? (
                     <input
@@ -600,6 +608,7 @@ export default function MainPage() {
               </div>
 
               {/* 「⋯」移动到文件夹菜单（hover 显现；阻止冒泡不触发打开） */}
+
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -627,6 +636,7 @@ export default function MainPage() {
               {menuDoc?.doc_id === d.doc_id && (
                 <>
                   {/* 点击菜单外区域关闭 */}
+
                   <div
                     className="fixed inset-0 z-20"
                     onClick={(e) => {
@@ -702,6 +712,7 @@ export default function MainPage() {
       )}
 
       {/* 空文件夹：虚线空态提示（计数/搜索行已在上方显示） */}
+
       {loaded && currentFolder && !hasDocs && (
         <div className="mt-6 flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-6 py-14 text-center dark:border-slate-600">
           <svg
@@ -726,6 +737,7 @@ export default function MainPage() {
       )}
 
       {/* 搜索/过滤无结果 */}
+
       {hasDocs && filtered.length === 0 && (
         <p className="mt-10 text-center text-sm text-slate-500 dark:text-slate-400">
           {query.trim()
@@ -748,7 +760,8 @@ export default function MainPage() {
           <p className="text-sm text-red-700 dark:text-red-300">
             {String(error)}
           </p>
-          {/* 阶段6-T1：Key 平时不再打扰；仅认证类失败时才引导进入设置 */}
+          {/* Key 平时不再打扰；仅认证类失败时才引导进入设置 */}
+
           {/401|403|api[ _-]?key|认证|unauthorized|invalid[ _-]?key/i.test(
             String(error),
           ) && (
@@ -762,7 +775,8 @@ export default function MainPage() {
         </div>
       )}
 
-      {/* 阶段11-T5 扩展：打开文献时发现翻译仍在跑 → 提示接管 */}
+      {/* 扩展：打开文献时发现翻译仍在跑 → 提示接管 */}
+
       <ConfirmDialog
         open={attachPrompt !== null}
         title="检测到未完成的翻译"
@@ -776,7 +790,7 @@ export default function MainPage() {
         onConfirm={() => {
           if (!attachPrompt) return;
           // 提取未完成（排版未定型）时只接管不进入：主页进度卡的自动跳转
-          // 会在 ≥EXTRACT_DONE 时兜底入场（阶段11-T6 门禁同款阈值）
+          // 会在 ≥EXTRACT_DONE 时兜底入场
           const ready = attachPrompt.progress >= EXTRACT_DONE;
           const r = attach(attachPrompt.jobId, attachPrompt.filePath);
           setAttachPrompt(null);
@@ -793,6 +807,7 @@ export default function MainPage() {
       />
 
       {/* 提取缓存失效（应用升级熔断/缓存清空）→ 确认后重新提取 */}
+
       <ConfirmDialog
         open={reextract !== null}
         title={`「${reextract?.doc.title ?? ""}」的提取缓存已失效`}

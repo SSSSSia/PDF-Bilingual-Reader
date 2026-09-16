@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 class BaseTranslator(ABC):
     """翻译 provider 抽象基类（决策 D3：统一接口）。
 
-    所有 provider 必须实现 translate()；translate_batch() 提供默认实现，
-    逐条调用 translate()（子类可覆盖以做批量优化）。
+    所有 provider 必须实现 translate；translate_batch 提供默认实现，
+    逐条调用 translate（子类可覆盖以做批量优化）。
     """
 
     #: provider 标识

@@ -1,4 +1,4 @@
-"""阶段11-T0 性能基线压测（可复现，决策门工具）。
+"""性能基线压测（可复现，决策门工具）。
 
 前置：后端已在 127.0.0.1:8000 运行（.venv/Scripts/python.exe backend/main.py），
 且 --pdf 指向一篇真实 PDF（建议用已翻译过的文档——缓存命中让 LLM 成本趋近于零，
@@ -12,12 +12,12 @@
   S1 idle       无负载 /api/health 延迟分布
   S2 translate  翻译流水线负载下 /api/health 与 /api/pipeline/status 的延迟
   S3 babeldoc   BabelDOC worker 负载下 /api/health 延迟 + worker RSS（测完自动取消）
-  S4 combined   翻译 + BabelDOC 并发下 /api/health 延迟（对齐 T4 验收线 P95 < 200ms）
+  S4 combined   翻译 + BabelDOC 并发下 /api/health 延迟（对齐 验收线 P95 < 200ms）
 全程后台每 3s 采样 python 进程 RSS，按命令行区分主后端（main.py）与
 babeldoc worker（babeldoc_worker.py）。
 
-产出：摘要表（stdout）+ 完整 JSON（logs/perf-baseline-<时间戳>.json）。
-判定参考（阶段11-T4 验收线）：并发重负载下 /api/health P95 < 200ms。
+产出：摘要表（stdout） + 完整 JSON（logs/perf-baseline-<时间戳>.json）。
+判定参考：并发重负载下 /api/health P95 < 200ms。
 """
 
 import argparse
@@ -197,7 +197,7 @@ async def main() -> None:
     print(f"\n完整报告已写入 {out_path}")
     health_p95 = [r["http://127.0.0.1:8000/api/health"].get("p95_ms")
                   for r in reports if "http://127.0.0.1:8000/api/health" in r]
-    print(f"各场景 health P95（ms）: {health_p95} —— T4 验收线: 并发重负载 P95 < 200")
+    print(f"各场景 health P95（ms）: {health_p95} —— 验收线: 并发重负载 P95 < 200")
 
 
 if __name__ == "__main__":

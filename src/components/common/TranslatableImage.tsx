@@ -8,11 +8,11 @@ const TABLE_IMG = /\/tab_p\d+_\d+\.png/;
 const ZH_IMG = /\.zh\.v\d+\.png/;
 
 /**
- * 可按需翻译的表格图片（2026-09-06 用户决策）：
+ * 可按需翻译的表格图片：
  * 全文翻译不等待表格；表格图右上角常驻「译」按钮，点击后单独调后端
  * 生成译制图（原排版+图内文字译文），就地替换显示。图（fig_*）不显示按钮。
  * 生成结果后端有文件级缓存，重复点击幂等。
- * interactive=false 时不显示按钮（原文栏：只有译文栏可生成译制图，用户反馈 2026-09-08）。
+ * interactive=false 时不显示按钮。
  */
 export default function TranslatableImage({
   md,

@@ -5,8 +5,8 @@
 只有无文本层的扫描页/图片页才需要回退视觉 OCR（见 pipeline/processor.py）。
 
 pymupdf4llm 基于 PyMuPDF，输出带标题/加粗/表格结构的 Markdown，
-并可把页内嵌入图片导出为文件、在 Markdown 中保留引用（对标 Scholaread
-的"图片随排版流展示"效果）。
+并可把页内嵌入图片导出为文件、在 Markdown 中保留引用
+（"图片随排版流展示"）。
 """
 import os
 import re
@@ -14,7 +14,7 @@ import unicodedata
 
 import pymupdf
 
-# pymupdf/pymupdf4llm 版本钉扎在 1.26.4/0.0.27（2026-09-13 决策）：
+# pymupdf/pymupdf4llm 版本钉扎在 1.26.4/0.0.27：
 # pymupdf4llm≥1.28 引入的 Layout 引擎（onnx 版面模型）有两个致命问题——
 # ① helper 链无条件硬导入 onnxruntime，PyInstaller onefile 冻结环境原生
 #    段错误（msvcp140 运行库冲突类，collect-all 也压不住），打包版后端
@@ -35,12 +35,12 @@ _HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _BR_TAG = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _SUP_TAG = re.compile(r"<sup>(.*?)</sup>", re.IGNORECASE | re.DOTALL)
 _SUB_TAG = re.compile(r"<sub>(.*?)</sub>", re.IGNORECASE | re.DOTALL)
-# 下划线标签（阶段2-T5 用户反馈"下划线还在"）：markdown 无下划线语法，
+# 下划线标签：markdown 无下划线语法，
 # 裸 HTML 会原样露出 → 只剥标签保留内容
 _U_TAG = re.compile(r"</?u>", re.IGNORECASE)
 
-# ── 双栏页列感知阅读顺序重排（2026-09-07 用户反馈"原文不全"）──────────
-# pymupdf4llm 按 y 带交错输出左右栏（DALK 首页实测：右栏顶部的段落续文
+# ── 双栏页列感知阅读顺序重排──────────
+# pymupdf4llm 按 y 带交错输出左右栏（右栏顶部的段落续文
 # 被排到摘要之前，还与 Abstract 头粘连）。标准双栏页的真实阅读顺序是
 # 左栏自上而下 → 右栏自上而下。判定保守：段落→原始块文本前缀匹配须
 # 命中大多数（少数措辞漂移段跟随邻段，见函数内）、左右两侧各 ≥3 个
@@ -63,7 +63,7 @@ def _match_block(h: str, norms: list[str], norms_alpha: list[str]) -> int | None
     匹配语义锚定：段落头包含于块内（h in t），或段落以块文本开头
     （h.startswith(t[:24])，VLM 把短块与后继块粘成一段的实测形态）。
     反例禁入：无锚定的子串包含会让表格残块（"C %"→norm 后单字符"c"）
-    匹配几乎所有段落（DALK p8 实测 6 段全配到一个 w=17 的残块上，
+    匹配几乎所有段落（ 6 段全配到一个 w=17 的残块上，
     排序 key 全为垃圾坐标）；<4 字符的头/块过短，宁可不配（跟随邻段）。"""
     if len(h) < 4:
         return None
@@ -81,8 +81,8 @@ def _match_block(h: str, norms: list[str], norms_alpha: list[str]) -> int | None
 def _column_reading_order(raw_blocks: list, md: str, col_rects: list | None = None) -> str:
     """双栏页 markdown 段落重排为列感知顺序（raw_blocks: page.get_text('blocks')）。
 
-    col_rects：版面模型 plain text 区域（阶段12-T10 反馈修复）——块级栏判定
-    （左右各 ≥3 窄块）失败的页（右栏整栏一个粗粒度文本块，DALK 首页实测
+    col_rects：版面模型 plain text 区域——块级栏判定
+    （左右各 ≥3 窄块）失败的页（右栏整栏一个粗粒度文本块，
     VLM 输出整页乱序而重排被拦）用区域级判定兜底：剔除通栏区域后左右
     各 ≥2 且栏沟干净即确证双栏。None（textlayer 降级路径）= 仅块级判定。"""
     paras = [p for p in re.split(r"\n\s*\n", md) if p.strip()]
@@ -110,7 +110,7 @@ def _column_reading_order(raw_blocks: list, md: str, col_rects: list | None = No
     # 邻段排序键重排（保持原顺序局部性，不跨页乱跳）；大面积对不上
     # （数学页 LaTeX 与文本层逐字符两套表示、参考文献切段差异）说明
     # 版式未被理解，仍整体放弃（防未知版式被搅乱）。纯图片引用段
-    # 无对应文本块，不计入失配统计（DALK p7 实测：有快照的页全部
+    # 无对应文本块，不计入失配统计（有快照的页全部
     # 跳过重排，换栏断词的续文永远排在其段头前面）。
     miss = [
         idx
@@ -166,7 +166,7 @@ _SUP_MAP = str.maketrans("0123456789+-=()ni", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻
 _SUB_MAP = str.maketrans("0123456789+-=()n", "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₙ")
 
 # caption 行锚点（图/表快照插回 markdown 的定位依据）。
-# 表格也走快照（2026-09-06 用户决策：文本表格转 markdown 必错位，
+# 表格也走快照（既定决策：文本表格转 markdown 必错位，
 # 统一按图片处理），所以 Table/表 注同样是有效锚点
 _FIG_CAPTION = re.compile(
     r"^\s*(?:Figure|Fig\.?|Table|Table\.?|图|表)\s*\d+", re.IGNORECASE | re.MULTILINE
@@ -181,10 +181,10 @@ _MIN_FIG_RATIO = 0.015     # 面积占页面比例下限（过滤图标/装饰�
 _MAX_FIG_RATIO = 0.92      # 上限（过滤整页背景）
 _MAX_FIG_TEXT_CHARS = 2000 # 区域内文本字符上限（兜底：防整页文本框误判；
                            # 矢量图表的轴标签/图例是真实文本，实测可达 1500+）
-_FIG_TEXT_COVER_MIN = 0.5  # 版面仲裁（T10 反馈 2）：区域内文本被模型 plain
+_FIG_TEXT_COVER_MIN = 0.5  # 版面仲裁：区域内文本被模型 plain
                            # text 区域覆盖 ≥ 此比例判文本框，快照否决——
                            # 实测全语料真图真表 ≤14%、prompt 示例框 ≥60%，
-                           # 0.5 落在空档中点（SubgraphRAG p5 实测 0.596）
+                           # 0.5 落在空档中点（0.596）
 _FIG_TEXT_COVER_CHARS = 200  # 仲裁参评的区域内文本下限（小区域覆盖噪声大）
 _FIG_SCALE = 2.5           # 快照渲染倍率（与视觉 OCR 一致）
 _MERGE_GAP = 12.0          # 区域合并空隙容差（pt）：图表内文字行把绘图簇
@@ -209,7 +209,7 @@ def _clean_html(md: str) -> str:
     return md
 
 
-# ── 伪标题降级（2026-09-08 用户反馈"这两句不是标题"）────────────────────
+# ── 伪标题降级────────────────────
 # pymupdf4llm 的字号启发式会把论文里的大字号强调句（研究问题、引导问句——
 # 排版上大号粗斜体但语义是正文）误判成 markdown 标题。双重后果：
 # ① 前端 prose h1 渲染出突兀巨字；② 模型把问句当标题处理，引号内保留
@@ -224,8 +224,8 @@ _SENT_END = re.compile(r"[?！？!.\u3002][\"'\u201d\u2019)]*$")
 # 数字编号开头的真标题（"1. Introduction"、"4.2 Method"）
 _NUM_HEADING = re.compile(r"^\d+(\.\d+)*[.:）)]?\s")
 # 句子证据词（代词/系动词/情态动词/关系与指示词），小写词面精确匹配——
-# 学术标题内这些词几乎总以大写出现（"Attention Is All You Need"），
-# 正文句子里则是小写（阶段11-T6 后登记的标题缺失根治，2026-09-12）
+# 学术标题内这些词几乎总以大写出现（""），
+# 正文句子里则是小写
 _SENT_EVIDENCE = re.compile(
     r"\b(we|our|ours|us|i|me|my|you|your|they|their|them|it|its|he|she|his|her"
     r"|is|are|was|were|be|been|being|am|has|have|had|do|does|did"
@@ -242,7 +242,7 @@ def _demote_sentence_headings(md: str, protect_first: bool = False) -> str:
       但句号结尾需同时 ≥6 词且非数字编号开头（真标题偶带句号，
       如 "1. Introduction."——编号开头或过短的保留）；
     - ≥14 词且带句子证据（小写开头，或含小写句法证据词）才降级。
-      2026-09-12 收窄：原先 ≥14 词一律降级，把 DALK 等长学术真标题
+      收窄：原先 ≥14 词一律降级，把 等长学术真标题
       （普遍 >14 词）误降为粗体段——下游续段合并把无终止符的降级标题
       当未完结段链式吞掉后续块（首页粘成一整块），页眉剔除又按
       "与文档标题相同"把降级标题块整体吃掉，标题彻底丢失；
@@ -279,8 +279,8 @@ def _demote_sentence_headings(md: str, protect_first: bool = False) -> str:
     return _HEADING_LINE.sub(repl, md)
 
 
-# ── 斜体误判上标还原（2026-09-08 用户反馈"公式还是有点问题"）──────────
-# DALK EMNLP 版实测：斜体排版的正文单词被 pymupdf4llm 的上标检测误判，
+# ── 斜体误判上标还原──────────
+# EMNLP 版实测：斜体排版的正文单词被 pymupdf4llm 的上标检测误判，
 # 输出 Unicode 上标字符——initial→ⁱⁿⁱtⁱal、node→ⁿode、new→ⁿew、
 # post-processing→post⁻processⁱⁿg、prune→pruⁿe。渲染后形如
 # "post^process^ng"，既难看又毁翻译。判据：词内嵌入上标字符必是误判
@@ -311,9 +311,9 @@ def _fix_italic_superscripts(md: str) -> str:
     return _SUP_WORD.sub(repl, md)
 
 
-# ── 跨栏粘连段拆分（2026-09-08 用户反馈"摘要混在上一行"）──────────────
+# ── 跨栏粘连段拆分──────────────
 # ACL/EMNLP 双栏版首页实测：作者单位区跨栏排版，pymupdf4llm 按 y 带分组
-# 会把「左栏单位行 + 行中孤立节标题（**Abstract**）+ 右栏片段」合并成
+# 会把「左栏单位行 + 行中孤立节标题（**Abstract**） + 右栏片段」合并成
 # 单段，且吸进的右栏片段在页面其它位置还有完整段落（内容重复）。
 # 修复：① 段中孤立已知节标题 → 拆成独立标题段（##）；② 段尾片段若在
 # 其它段中完整出现（归一化 ≥45 字符）→ 截除（内容已在别处，无损失）。
@@ -355,7 +355,7 @@ def _split_glued_columns(md: str) -> str:
             else [para]
         )
         for seg in segs:
-            # 结构性标题段（# 开头）豁免规则②③（2026-09-12 FG-RAG 实测）：
+            # 结构性标题段（# 开头）豁免规则②③：
             # ACM 引用段/页眉行里合法含有标题全文，标题段的"尾部窗口在其它
             # 段落出现"并非跨栏吸入而是正常引用——据此截除会把整段标题截空；
             # 规则③同理（标题是后续段的自然前缀情形不适用）。标题去留交给
@@ -379,7 +379,7 @@ def _split_glued_columns(md: str) -> str:
             if not plain:
                 continue
             # 3) 独立碎片段去重：剥掉列表标记后是其它段落的更长前缀
-            #    （y 带交错截出的残缺重复块，EMNLP 版 DALK p4 实测）
+            #    （y 带交错截出的残缺重复块，EMNLP 版）
             frag = _LEADING_NUM.sub("", plain)
             if not is_heading and len(frag) >= _MIN_FRAG_PLAIN:
                 for j, pl in enumerate(plains):
@@ -397,7 +397,7 @@ def _merge_rects(rects: list, gap: float = 0.0) -> list:
     gap > 0 时把「空隙不超过 gap」的相邻矩形也并到一起（膨胀探测、
     取原矩形并集，不裁边）。必须有：图表内部的文字行不产生绘图簇，
     簇与簇之间留有几 pt 空隙——只合并相交矩形会把同一张图拆成
-    多条横带（2026-09-07 TOG 论文 Figure 被拆 4 份踩坑）。"""
+    多条横带。"""
     rects = [pymupdf.Rect(r) for r in rects if r and r.width > 1 and r.height > 1]
     changed = True
     while changed:
@@ -430,31 +430,31 @@ def _figure_regions(
 ) -> list:
     """检测页面的图/表区域（栅格图 + 矢量绘图簇 + 表格统一处理）。
 
-    表格也按图片快照（2026-09-06 用户决策：文本表格转 markdown 必错位；
+    表格也按图片快照（既定决策：文本表格转 markdown 必错位；
     find_tables 的 bbox 直接作为候选区域，borderless/booktabs 表也能命中）。
 
-    extra_regions（阶段12-T9.2）：版面模型（DocLayout-YOLO）的 table/figure
+    extra_regions：版面模型（DocLayout-YOLO）的 table/figure
     区域矩形，作为额外候选并入同一条漏斗（合并/面积/文本密度过滤）——
     无框表 find_tables 检不出，靠模型区域补位；与既有候选重叠时由
     _merge_rects 的空隙合并天然去重。
 
-    text_regions（阶段12-T10 反馈 2）：版面模型 plain text 区域，作为最终
+    text_regions：版面模型 plain text 区域，作为最终
     区域的仲裁信号——带边框的文本示例框（ICLR 附录 prompt 案例框，
-    SubgraphRAG p22-29 / DALK p17-18 实测）的矢量矩形会被 cluster_drawings
-    （有时连模型自己也低置信误判 figure/table，SubgraphRAG p5）当图表，
+    / ）的矢量矩形会被 cluster_drawings
+    （有时连模型自己也低置信误判 figure/table）当图表，
     快照会吞掉整块正文（truth 扣空 → 交叉校验失明、遮罩搅乱 VLM、降级
     路径 redact 挖空文本层）。仲裁口径 = 区域内文本字符被 plain text
     区域覆盖的比例（块主体 ≥50% 在区域内即计入）——模型检测碎片化的
     附录页上矩形并集盖不满框内留白，字符覆盖才是内容口径。实测全语料
-    分离度：真图真表 0~14%，prompt 框 60~100%（见 docs/阶段12 §7.4）。
+    分离度：真图真表 0~14%，prompt 框 60~100%。
 
-    caption_regions（阶段12-T10 反馈 7）：版面模型 figure_caption/table_caption
+    caption_regions：版面模型 figure_caption/table_caption
     区域 + 严格注释行文本块（Figure/Table N 开头、块高 ≤45pt）——注释边界
     收夹：注释被卷进快照会被遮罩（VLM 看不见 → 输出缺注释 → 快照插回无
-    锚点被甩页尾，SubgraphRAG p2 实测），且注释后的正文跟着被吞。收夹规则
+    锚点被甩页尾），且注释后的正文跟着被吞。收夹规则
     = 注释贴近哪条边就把那条边收到注释外沿（图注在下方收底、表注在上方
     收顶，同侧多条取最保守）；守卫：收夹不得切割模型 figure/table 区域
-    主体，违反即放弃收夹（DALK p8 跨栏合并大块此类，维持现状）。
+    主体，违反即放弃收夹（跨栏合并大块此类，维持现状）。
 
     过滤规则：
     - 面积占比 [_MIN_FIG_RATIO, _MAX_FIG_RATIO]；
@@ -545,10 +545,10 @@ def _clamp_by_captions(
     caption_regions: list | None,
     debug: bool = False,
 ) -> list:
-    """注释边界收夹（T10 反馈 7）：把卷进快照的注释及其后的正文放出
+    """注释边界收夹：把卷进快照的注释及其后的正文放出
     遮罩/扣除——注释留在文本流里，快照插回才有锚点、注释后才翻得着。
 
-    边界来源：模型 caption 区域（几何可靠）+ 严格注释行文本块（关键词
+    边界来源：模型 caption 区域（几何可靠） + 严格注释行文本块（关键词
     Figure/Table N 几何化，模型漏检注释的页兜底）。规则：注释与区域横向
     重叠 ≥50%（同栏）且贴近某条边（在该边 65% 范围内）→ 该边收到注释
     外沿 2pt；同侧多条注释取最保守（收得最少的）边界。守卫：任一模型
@@ -598,7 +598,7 @@ def _clamp_by_captions(
 
 
 def _figure_inner_text_rects(page, regions: list) -> list:
-    """返回图表区域内部的文本块 bbox（用于 redact 剔除，2026-09-06 用户反馈）。
+    """返回图表区域内部的文本块 bbox。
 
     图/表内部的文字（表格数字、轴标签、图例）若按正文提取会变成乱码段落
     且被重复翻译——快照图已"原模原样"包含它们，文本层必须剔除。
@@ -661,7 +661,7 @@ def _region_lines(page, region) -> list[dict]:
 def _absorb_header_lines(page, r) -> None:
     """把紧邻区域上方的表头文本行并入区域（原地修改 r）。
 
-    实测（HippoRAG Table 2）：表格绘图簇从第一条横线开始，表头
+    实测（Table 2）：表格绘图簇从第一条横线开始，表头
     （MuSiQue | 2Wiki | HotpotQA | Average 及 R@2/R@5 行）悬在簇上方
     不在区域内——redact 漏掉它们，pymupdf4llm 把残余表头识别成小
     markdown 表格残留正文，用户看到表头被"翻译了两遍"。
@@ -702,14 +702,14 @@ def _snapshot_figures(
 ) -> tuple[list[str], list]:
     """把页面图表区域截图为 PNG，返回 (图片引用列表, 最终区域列表)。
 
-    区域分类（2026-09-06 用户决策）：与 find_tables bbox 重叠 >50% 的判为
+    区域分类：与 find_tables bbox 重叠 >50% 的判为
     表格，快照命名 tab_*；其余为图，命名 fig_*。表格的译制图改为"全文翻译
     完成后用户点按触发"（按需，不拖慢全文），sidecar 记录 kind 与源 PDF。
 
-    extra_regions/table_regions（阶段12-T9.2）：版面模型的 table/figure 区域
+    extra_regions/table_regions：版面模型的 table/figure 区域
     矩形——前者并入 _figure_regions 候选（无框表补位），后者并入 table_boxes
     参与分类（模型判 table 的区域即使 find_tables 不认也命名 tab_*，
-    译制图按钮的语义才成立）。text_regions（T10 反馈 2）：版面模型
+    译制图按钮的语义才成立）。text_regions：版面模型
     plain text 区域，仲裁几何候选（见 _figure_regions docstring）。
 
     同时落盘 sidecar JSON（<fig>.json：区域坐标 + 图内逐行文字元数据），
@@ -718,7 +718,7 @@ def _snapshot_figures(
     返回最终区域（外扩+表头吸收后）供 redact 使用——redact 必须与快照
     同一区域，否则表头等悬在簇外的文字只进快照不被抹除，正文残留
     （pymupdf4llm 会把残余表头再识别成小 markdown 表格，用户看到
-    "表头翻译了两遍"，HippoRAG 实测）。"""
+    "表头翻译了两遍"）。"""
     import json
 
     page = doc[page_num]
@@ -731,7 +731,7 @@ def _snapshot_figures(
     refs: list[str] = []
     final_regions: list = []
     pad = 3.0  # 快照外扩（pt）：实测 find_tables/绘图簇 bbox 会裁掉表格右缘
-    # 最后一个数字（HippoRAG Table 5 "77.4" 只剩半个 "5"），小外扩零风险
+    # 最后一个数字（Table 5 "77.4" 只剩半个 "5"），小外扩零风险
     for k, r0 in enumerate(
         _figure_regions(
             page,
@@ -760,7 +760,7 @@ def _snapshot_figures(
             pix.save(path)
         except Exception as e:
             # 静默 continue 曾把整条快照管线打空且无任何日志（目录不存在
-            # 时 save 必炸，2026-09-07 TOG 论文全页无图踩坑）——必须留痕
+            # 时 save 必炸，TOG 论文全页无图踩坑）——必须留痕
             print(f"[figure] p{page_num + 1}: 快照保存失败 {os.path.basename(path)}: {e}")
             continue  # 单个快照失败不阻断整页
         if debug:
@@ -784,9 +784,9 @@ def _snapshot_figures(
     return refs, final_regions
 
 
-# 插图锚点专用（2026-09-07 收紧）：caption 在编号后必带冒号/句点。
+# 插图锚点专用：caption 在编号后必带冒号/句点。
 # _FIG_CAPTION 不带标点要求，正文里 "Table 4 illustrates ..." 这类普通
-# 段落也会命中，快照被插进正文中间（DALK p7 实测：Table 4 快照插在
+# 段落也会命中，快照被插进正文中间（Table 4 快照插在
 # "Table 4 illustrates" 段前、Figure 3 快照配错 caption）
 _INSERT_ANCHOR = re.compile(
     r"^\s*(?:Figure|Fig\.?|Tab\.?|Table|图|表)\s*\d+\s*[:：.]",
@@ -800,10 +800,10 @@ def _insert_figures(
 ) -> str:
     """把图快照引用插回 markdown（caption 锚定）。
 
-    v2（2026-09-07）：几何配对。序号配对「第 k 快照（页面 y 序）↔ 第 k
+    v2：几何配对。序号配对「第 k 快照（页面 y 序）↔ 第 k
     caption（markdown 序）」在两栏页上必错——caption 可能在表格上方，
     且 y 带交错输出会让 caption 的 markdown 序与快照 y 序不一致
-    （DALK p7 实测：快照序 tab→fig→tab，caption 序 Table3→Table4→Figure3，
+    （快照序 tab→fig→tab，caption 序 Table3→Table4→Figure3，
     Figure 3 的图配到了 Table 4 caption 旁）。改为用 raw_blocks 里 caption
     块的坐标与快照区域做「垂直贴近 + 水平重叠」就近匹配，再按 caption
     文本在 markdown 中定位插入点。无几何信息时退回 v1 序号配对。
@@ -908,18 +908,17 @@ def _find_para_pos(md: str, cnorm: str) -> int | None:
     return None
 
 
-# ── 字号几何证据（阶段12 验收期修复，2026-09-14）─────────────────────
+# ── 字号几何证据─────────────────────
 # VLM「OCR:」输出是平文本：无 # 标题层级、首页小字版权块与正文同权
-# （FG-RAG 重翻验收实测：全篇零标题、ACM 权限声明混在作者信息里）。
+# （重翻验收实测：全篇零标题、ACM 权限声明混在作者信息里）。
 # 修法沿用 title_detect 哲学——回读 PDF 一手字号证据，类级通用。
-#
 # 判定规则（4 版式语料标定：ACL 双栏/ACM 会议/NeurIPS/ACM 期刊）：
 # - 标题行 = 整行粗体（≥80% 字符在粗体 span）且字号 ≥ 正文字号且
 #   含 ≥2 个字母（剔纯数字表行）且非图表注（_FIG_CAPTION）。
-#   粗体是关键区分器：FG-RAG 作者名比节标题更大但不粗、Attention 的
+#   粗体是关键区分器：作者名比节标题更大但不粗、
 #   arXiv 侧章与 Abstract 同号但不粗——均被排除；
 # - 正文字号基准取**第 0 页众数**（出版模板全文恒定；逐页取会被
-#   参考文献页整页小字带偏，FG-RAG p5 实测 body 塌到 7pt）；
+#   参考文献页整页小字带偏， body 塌到 7pt）；
 # - 字号量化到 0.5pt 网格再比较（PDF span 有 ±0.2 渲染抖动，8.9/9.0/
 #   9.1 是同一名义字号，不量化会把众数和比例全搅乱）；
 # - 层级：节编号深度定级（"4"→##、"3.4"/"3.2.1"→###，学界通用约定）；
@@ -1047,7 +1046,7 @@ def collect_font_evidence(
         key=lambda ln: (ln["y0"], ln["x0"]),
     )
     # 排版惯例：标题首字符必为大写/数字/CJK——小写开头的粗体行是
-    # 表格单元格/正文片段（FG-RAG p3 表行实测）。纯数字行（编号片段）
+    # 表格单元格/正文片段（表行实测）。纯数字行（编号片段）
     # 允许进入下一步与同行标题文本合并。
     cands = [
         ln
@@ -1208,11 +1207,11 @@ def count_pages(file_path: str) -> int:
 
 
 def _strip_broken_links(page) -> None:
-    """get_links 崩溃时清空页 /Annots（2026-09-14 阶段12 实测）。
+    """get_links 崩溃时清空页 /Annots。
 
     症状：apply_redactions 删除重叠注解后可能留下悬空链接项，随后
-    pymupdf4llm 遍历 page.get_links() 提超链接时迭代器越界
-    （IndexError），整页提取直接崩（Attention p10 / Survey p5 实测，
+    pymupdf4llm 遍历 page.get_links 提超链接时迭代器越界
+    （IndexError），整页提取直接崩（/ ，
     均发生在 redact 副本分支；原本注解就损坏的 PDF 同理）。
     处理：get_links 正常的页不动（保留超链接提取）；崩溃的页清空
     /Annots——只丢该提取副本上的超链接/批注，正文不受影响。
@@ -1238,7 +1237,7 @@ def extract_page_md(
 ) -> str:
     """单页文本层提取（pymupdf4llm + 全部清洗/插图锚定/列序链）。
 
-    从 extract_pages 拆出（阶段12-T2）：快照由调用方先行完成并传入
+    从 extract_pages 拆出：快照由调用方先行完成并传入
     （refs/snap_regions）——VLM 主路线的降级路径与文本层路线必须共用
     同一份 _snapshot_figures 产物，遮罩、truth 扣除、redact 三者同区域
     才自洽。返回 markdown（可能为空，页有效性判定归调用方）。"""
@@ -1275,11 +1274,10 @@ def extract_page_md(
     if not md:
         return ""
     md = _clean_html(md)
-    # 斜体误判上标还原（DALK 实测 ⁱⁿⁱtⁱal/ⁿode/post⁻processⁱⁿg）
+    # 斜体误判上标还原（ⁱⁿⁱtⁱal/ⁿode/post⁻processⁱⁿg）
     md = _fix_italic_superscripts(md)
     # 伪标题降级：大字号强调句被误判成标题会巨字渲染+翻译劣化。
     # 页 0 首个标题是论文标题的位置证据，豁免长标题降级
-    # （DALK/FG-RAG 标题丢失根治，2026-09-12）
     md = _demote_sentence_headings(md, protect_first=(pno == 0))
     # 跨栏粘连段拆分：单位行+行中 Abstract 标题+右栏片段合成一段
     md = _split_glued_columns(md)
@@ -1287,7 +1285,7 @@ def extract_page_md(
         md = _normalize_image_refs(md, image_dir)
         # 先锚定插图（此时 markdown 仍是页面 y 带顺序），再列重排。
         # v2 几何配对：用 caption 块坐标就近匹配快照区域，
-        # 序号配对在双栏页上会把图配错 caption（DALK p7 实测）
+        # 序号配对在双栏页上会把图配错 caption
         md = _insert_figures(md, refs, snap_regions=snap_regions, raw_blocks=raw_blocks)
     # 列重排：图片引用段跟随其 caption 同进同退
     md = _column_reading_order(raw_blocks, md)
@@ -1297,15 +1295,15 @@ def extract_page_md(
 def extract_pages(
     file_path: str, page_nums: list[int], image_dir: str | None = None
 ) -> list[str | None]:
-    """提取指定页的文本层 Markdown（页级流式提取的基础，阶段1-T5）。
+    """提取指定页的文本层 Markdown。
 
     page_nums 按序提取，返回等长列表；无有效文本层的页为 None。
-    图片策略（用户反馈"图片原模原样显示"，2026-09-06）：
+    图片策略：
     - 不再使用 pymupdf4llm 的 write_images（栅格图常被拆成几十张碎片）；
     - 统一走 _snapshot_figures：检测「栅格图区域 + 矢量绘图簇」（合并、
       面积/文本密度过滤），高清截图后按 caption 锚定插回 markdown——
       矢量图表（LaTeX/绘图导出）也能原样显示。
-    - 图表内部文字 redact 剔除（用户反馈"图片被转成文字重复翻译"，同日）：
+    - 图表内部文字 redact 剔除：
       在文档副本上对区域内的文本块做 redaction（图注豁免），pymupdf4llm
       改在副本上提取——图内文字只存在于快照图中，不再变成乱码段落。
     单页提取约 0.5-1s（表格检测+redact 副本），上层逐页调用实现首页秒开。

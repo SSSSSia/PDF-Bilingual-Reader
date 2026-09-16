@@ -29,7 +29,7 @@ async def call_ocr(
 ) -> list:
     """视觉 OCR。only_pages 指定仅识别这些页（文本层提取后仍缺内容的扫描页）。
 
-    page_image_dir 非空时（用户反馈"扫描页的图片表格看不到"，2026-09-06）：
+    page_image_dir 非空时：
     把每页渲染图同时存盘，并在该页 OCR markdown 顶部插入 `![Page](路径)`
     引用——扫描页的表格/产品图都是整页位图的一部分，本地无法定位子区域，
     整页快照是"原模原样"的兜底方案；切块后成为独立纯图片块，不送翻译。"""
@@ -163,28 +163,28 @@ async def _ocr_image(
     return text
 
 
-# ── 段级切块（用户决策：双语按块对照）──────────────────────────────────
+# ── 段级切块──────────────────────────────────
 # 按空行切段，一段一块。不做句级切分——句级切分会把连贯论述拆成
 # 一句一句的碎片（实测反馈"排版都是一句一句的"），且打断表格/标题结构。
 # 切块发生在 OCR 缓存读取之后，因此改切块策略不影响缓存命中。
 
-# 页脚噪音（用户反馈"页码被翻译"，2026-09-06）：纯页码/罗马页码/Page N of N
-# 2026-09-07 增补 ACM 期刊页码 "111:2"（(Survey)Graph RAG 实测每页一块）
+# 页脚噪音：纯页码/罗马页码/Page N of N
+# 增补 ACM 期刊页码 "111:2"（Graph RAG 实测每页一块）
 _NOISE_BLOCK = re.compile(
     r"^(?:\d{1,4}|[ivxlcdm]{1,8}|page\s*\d+(?:\s*(?:of|/)\s*\d+)?|\d{1,4}:\d{1,3})$",
     re.IGNORECASE,
 )
 
-# 页眉作者行（ACM 版式页眉 "Peng et al."，2026-09-07 Survey 实测）：
+# 页眉作者行：
 # 仅"单姓 + et al."的极短行才算——带逗号/缩写的引用条目（"Smith J, et al."）
 # 不匹配，防止误杀参考文献
 _RUNNING_HEAD = re.compile(r"^[A-Z][a-zA-Z\-']{1,20}\s+et\s+al\.?$")
 
-# 页眉/页脚固定文案（用户反馈"跨页合并把 'Published as a conference paper
-# at ICLR 2024' 吸进正文"，2026-09-07）：论文模板每页重复的出版声明/arXiv
+# 页眉/页脚固定文案（实测反馈"跨页合并把 'Published as a conference paper
+# at ICLR 2024' 吸进正文"）：论文模板每页重复的出版声明/arXiv
 # 标识。短块 + 特征短语才判页脚——正文里讨论这些短语的整段不受影响。
-# 2026-09-07 增补 ACM 期刊页脚（"J. ACM, Vol. 37, No. 4, Article 111.
-# Publication date: September 2024."，Survey 每页重复，实测挡住跨页续段合并）
+# 增补 ACM 期刊页脚（"J. ACM, Vol. 37, No. 4, Article 111.
+# Publication date: September 2024."，每页重复，实测挡住跨页续段合并）
 _FOOTER_PAT = re.compile(
     r"published\s+as\s+a\s+conference\s+paper"
     r"|arxiv[:\s]*\d{4}\.\d{4,5}"
@@ -197,8 +197,8 @@ _FOOTER_PAT = re.compile(
 )
 _FOOTER_MAX_CHARS = 140
 
-# run-in 引导标题拆分（用户反馈"只有一个标题，但输出了一大段话"，
-# 2026-09-07 Survey 实测）：术语定义段以斜体/粗体引导词开头
+# run-in 引导标题拆分（实测反馈"只有一个标题，但输出了一大段话"，
+# ）：术语定义段以斜体/粗体引导词开头
 # （"_Graph-Enhanced Generation (G-Generation)._ The graph-enhanced ..."，
 # LaTeX \paragraph{} 惯例），标题与定义正文拆成两块——标题单独成块
 # 展示/翻译，正文独立参与续段合并。终结符必须在强调符内侧才拆

@@ -3,7 +3,7 @@ import type { DocMeta } from "../types";
 import { renderFirstPage } from "../lib/pdfThumb";
 
 /**
- * 文档库卡片首页缩略图（2026-09-09 靠岸学术风格改版）。
+ * 文档库卡片首页缩略图。
  * 对 file_exists 的文档逐个渲染第一页（并发受限），失败/缺失留空由卡片显示占位。
  * docs 列表变化（返回主页重新拉取）时自动重算。
  */

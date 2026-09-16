@@ -1,7 +1,7 @@
-"""BabelDOC 运行时定位（阶段9-T6 直接捆绑方案）。
+"""BabelDOC 运行时定位。
 
-方案沿革：2026-09-11 曾决策「可选组件 + 应用内下载」（下载链路见 git 历史
-babeldoc_runtime 早期版本），2026-09-12 用户复核后改为**直接捆绑**——目标
+方案沿革：曾决策「可选组件 + 应用内下载」（下载链路见 git 历史
+babeldoc_runtime 早期版本），用户复核后改为**直接捆绑**——目标
 用户多为非计算机专业、不在意体积，随包分发最可控（安装包 ~72MB→约 400MB，
 安装后 +660MB）。运行时由 scripts/build-babeldoc-runtime.ps1 暂存为
 dist/babeldoc-runtime/（python-3.12 embeddable 自包含 + .venv-babeldoc

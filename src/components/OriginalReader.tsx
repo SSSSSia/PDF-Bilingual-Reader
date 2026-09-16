@@ -14,27 +14,26 @@ type BBoxSeg = { page: number; bbox: BBox };
 type Overlay = { block: TextBlock; bb: BBox };
 
 /**
- * 原版对照模式（阶段5-T3，D6 立项）：pdfjs 原样渲染 PDF 页面（公式/图表/
+ * 原版对照模式：pdfjs 原样渲染 PDF 页面（公式/图表/
  * 双栏版式零损失），已译块按多段 bbox 高亮（断栏/跨页续段各自所在页都
  * 有高亮），点击浮层查看译文。
  *
- * 设计要点（Spike 实测依据见 docs/阶段4-原生渲染路线评估.md §4.1）：
+ * 设计要点：
  * - 连续滚动逐页懒渲染：IntersectionObserver(rootMargin 600px) 触发，
- *   渲染任务可取消（task.cancel）防止快速滚动时的渲染竞态
- *   （阶段7-T4 抽为 usePdfDocument/useLazyPage，与左右对照形态共用）；
+ * 渲染任务可取消（task.cancel）防止快速滚动时的渲染竞态
  * - fit-width × devicePixelRatio × zoom：canvas 物理像素按 dpr 放大保证
- *   高清，CSS 尺寸按逻辑 scale 定位——overlay 坐标 = bbox(pt) × scale；
+ * 高清，CSS 尺寸按逻辑 scale 定位——overlay 坐标 = bbox(pt) × scale；
  * - bbox 为 PyMuPDF top-left 原点坐标，与 pdfjs 旋转 0° viewport 直接
- *   乘法兼容；旋转页不渲染 overlay（坐标会错位，明确提示）；
+ * 乘法兼容；旋转页不渲染 overlay（坐标会错位，明确提示）；
  * - bbox 缺失（公式碎块/图内文字/扫描页）只是不高亮，页面渲染零依赖匹配。
  */
 export default function OriginalReader() {
   const filePath = usePdfStore((s) => s.filePath);
   const pages = usePdfStore((s) => s.pages);
-  // 阶段7-T1/T2：zoom 收敛到 uiStore 全局缩放（三形态共用 + localStorage 持久化；
+  // /zoom 收敛到 uiStore 全局缩放（三形态共用 + localStorage 持久化；
   // Ctrl+滚轮由本组件根容器 useZoomWheel 驱动，± 控件统一在工具栏，
-  // 此处不再放重复控件——2026-09-09 用户反馈两处缩放计数重复）。
-  // 阶段7-T2：用户未手动设置过缩放（zoom=null）时，原版缺省 70%
+  // 此处不再放重复控件——实测反馈两处缩放计数重复）。
+  // 用户未手动设置过缩放（zoom=null）时，原版缺省 70%
   // （固定版式 100% 偏大，70% 更接近 PDF 阅读器惯例）；设置过则全形态用用户值。
   const zoom = effectiveZoom(
     useUiStore((s) => s.zoom),
@@ -81,14 +80,14 @@ export default function OriginalReader() {
 
   return (
     /* 外层 wrapper 挂 Ctrl+滚轮缩放 hook（事件冒泡至此监听，
-       preventDefault 仍可拦 WebView2 页面缩放）；内层滚动容器
-       的 wrapRef 专职 wrapW 测量（fit-width 基准，一个节点一个 ref） */
+       * preventDefault 仍可拦 WebView2 页面缩放）；内层滚动容器
+       * 的 wrapRef 专职 wrapW 测量（fit-width 基准，一个节点一个 ref） */
     <div ref={zoomRef} className="flex h-full min-h-0 flex-col">
       <div
         ref={wrapRef}
         className="relative min-h-0 flex-1 overflow-auto bg-slate-200 dark:bg-slate-950"
       >
-      {/* 缩放走工具栏统一控件（阶段7-T1）：此处不再放重复的 ± 控件。
+      {/* 缩放走工具栏统一控件：此处不再放重复的 ± 控件。
           「点高亮块看译文」操作提示保留为纯文字小条。 */}
       <div className="sticky left-2 top-2 z-20 w-max rounded-lg border border-slate-300 bg-white/95 px-2 py-1 text-xs text-slate-400 shadow-sm backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-500">
         点高亮块看译文 · 缩放用上方控件或 Ctrl+滚轮
@@ -110,10 +109,10 @@ export default function OriginalReader() {
 
       {pdf && (
         /* 页面列容器显式宽度 = fit-width × zoom（每页 CSS 宽度公式相同，
-           可直接算出，不必等懒渲染）——滚动区域宽度由显式宽度决定，
-           放大超宽时横向滚动必然可用（2026-09-09 用户反馈：溢出传播
-           在 w-full/max-w 容器链上不可靠，右侧被裁且无法滚动）。
-           zoom=1 时宽 = wrapW-16 < 容器宽，居中且完整显示。 */
+           * 可直接算出，不必等懒渲染）——滚动区域宽度由显式宽度决定，
+           * 放大超宽时横向滚动必然可用（实测反馈：溢出传播
+           * 在 w-full/max-w 容器链上不可靠，右侧被裁且无法滚动）。
+           * zoom=1 时宽 = wrapW-16 < 容器宽，居中且完整显示。 */
         <div
           className="mx-auto px-4 pb-16 pt-3"
           style={{ width: wrapW > 0 ? (wrapW - 48) * zoom + 32 : undefined }}
@@ -135,7 +134,7 @@ export default function OriginalReader() {
   );
 }
 
-/** 单页：懒渲染 canvas + bbox overlay（多段）+ 译文浮层 */
+/** 单页：懒渲染 canvas + bbox overlay（多段） + 译文浮层 */
 function OriginalPage({
   pdf,
   pageNo,
@@ -149,7 +148,7 @@ function OriginalPage({
   wrapW: number;
   zoom: number;
 }) {
-  // 懒渲染逻辑抽至 useLazyPage（阶段7-T4，与左右对照形态共用）
+  // 懒渲染逻辑抽至 useLazyPage
   const { holderRef, canvasRef, layout, rotated } = useLazyPage({
     pdf,
     pageNo,
@@ -229,7 +228,7 @@ function OriginalPage({
   );
 }
 
-/** 译文浮层：只显示译文（用户反馈 2026-09-07），优先贴块下方，空间不足翻到上方 */
+/** 译文浮层：只显示译文，优先贴块下方，空间不足翻到上方 */
 function BlockCard({
   block,
   bb,
@@ -258,7 +257,8 @@ function BlockCard({
           译文
         </span>
         <div className="flex items-center gap-1.5">
-          {/* 公式块只出「式」（识别成功自动重译，2026-09-08），其余「译/重译」 */}
+          {/* 公式块只出「式」，其余「译/重译」 */}
+
           {block.formula_hint ? (
             <FormulaButton block={block} />
           ) : (

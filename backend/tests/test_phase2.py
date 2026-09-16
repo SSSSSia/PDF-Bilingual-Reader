@@ -1,4 +1,4 @@
-"""阶段2 翻译质量工程单元测试：sanitize / finish_reason 减半重试 / 跨页合并 / 缓存版本。"""
+"""翻译质量工程单元测试：sanitize / finish_reason 减半重试 / 跨页合并 / 缓存版本。"""
 
 import asyncio
 from unittest.mock import AsyncMock, patch
@@ -91,7 +91,7 @@ def test_short_text_never_formula():
     assert is_formula_block("_E_⁰") is False
 
 
-# ── sanitize.has_heavy_math（数学密集混合块，2026-09-08 截图实测）──────
+# ── sanitize.has_heavy_math──────
 
 
 def test_heavy_math_replacement_char_detected():
@@ -196,17 +196,17 @@ def test_protect_formulas_keeps_plain_words():
     assert restore(translated) == "我们使用 adam_optimizer 与 32 的 batch_size，效果很好。"
 
 
-# ── sanitize.strip_prompt_echo（提示词背景信息回声剥离，2026-09-07）──
+# ── sanitize.strip_prompt_echo──
 
 
 def test_prompt_echo_title_stripped():
-    """译文开头的「论文标题：<原题>」回声行被剥掉（DALK 实测形态）。"""
+    """译文开头的「论文标题：<原题>」回声行被剥掉。"""
     from translate.sanitize import strip_prompt_echo
 
-    title = "**DALK: Dynamic Co-Augmentation of LLMs and KG to answer Alzheimer's Disease Questions with Scientific Literature**"
+    title = "**DEMO: A Co-Augmentation Framework of LLMs and KG for Scientific Question Answering**"
     t = (
-        "论文标题：DALK: Dynamic Co-Augmentation of LLMs and KG to answer "
-        "Alzheimer's Disease Questions with Scientific Literature\n"
+        "论文标题：DEMO: A Co-Augmentation Framework of LLMs and KG for "
+        "Scientific Question Answering\n"
         "为了解决这些局限性，我们提出了"
     )
     out = strip_prompt_echo(t, title)
@@ -217,13 +217,13 @@ def test_prompt_echo_keeps_real_title_translation():
     """标题块的正确翻译不能被误伤：内容与注入 doc_title 不一致就保留。"""
     from translate.sanitize import strip_prompt_echo
 
-    title = "**DALK: Dynamic Co-Augmentation of LLMs and KG**"
-    assert strip_prompt_echo("DALK：大语言模型与知识图谱的动态协同增强", title) == (
-        "DALK：大语言模型与知识图谱的动态协同增强"
+    title = "**DEMO: A Co-Augmentation Framework of LLMs and KG**"
+    assert strip_prompt_echo("DEMO：大语言模型与知识图谱的协同增强", title) == (
+        "DEMO：大语言模型与知识图谱的协同增强"
     )
     assert (
-        strip_prompt_echo("论文标题：DALK：动态协同增强框架", title)
-        == "论文标题：DALK：动态协同增强框架"
+        strip_prompt_echo("论文标题：DEMO：协同增强框架", title)
+        == "论文标题：DEMO：协同增强框架"
     )
 
 
@@ -247,11 +247,11 @@ def test_prompt_echo_normal_text_untouched():
     assert strip_prompt_echo(t, "**some title**") == t
 
 
-# ── openai_compat 批量协议（阶段12-T6 起 JSON 数组；解析用例见
+# ── openai_compat 批量协议（起 JSON 数组；解析用例见
 #    test_providers.py，此处保留传输层失败路径）────────────────────────
 
 
-# ── finish_reason=length → 减半重试（阶段2-T1）───────────────────────
+# ── finish_reason=length → 减半重试───────────────────────
 
 
 def _fake_resp(content, finish_reason="stop"):
@@ -302,7 +302,7 @@ def test_batch_halves_on_truncation():
     assert calls["n"] >= 3  # 1 次批次截断 + 减半后的请求
 
 
-# ── 缓存键版本化（阶段2-T2）──────────────────────────────────────────
+# ── 缓存键版本化──────────────────────────────────────────
 
 
 def test_translate_key_prompt_version_changes_key():
@@ -312,7 +312,7 @@ def test_translate_key_prompt_version_changes_key():
     assert k1 != k2  # 升版本后旧缓存自然失效
 
 
-# ── 跨页段落合并（阶段2-T3）──────────────────────────────────────────
+# ── 跨页段落合并──────────────────────────────────────────
 
 
 def _page(page, blocks):
@@ -373,9 +373,9 @@ def test_hyphenated_word_joined():
     assert out[0]["blocks"][-1]["original"] == "the representation power of graphs"
 
 
-# ── 全文续段合并升级（2026-09-07）：跳过结构性块找目标 ────────────────
+# ── 全文续段合并升级：跳过结构性块找目标 ────────────────
 # 旧版只看「前页末块+后页首块」，页末脚注会挡住真正被切断的段落
-# （DALK 首页实测：脚注在页末，续文在中间或跨栏）。
+# （脚注在页末，续文在中间或跨栏）。
 
 
 def test_merge_skips_footnotes_to_find_target():
@@ -447,7 +447,7 @@ def test_chain_merge_until_terminal():
 
 
 def test_merge_skips_caption_to_find_target():
-    # 段落被图表打断（用户实测：大部分截断由图表块引起）：caption 属结构块，
+    # 段落被图表打断：caption 属结构块，
     # 透明越过找到真正的续文
     pages = [
         _page(0, [
@@ -502,7 +502,7 @@ def test_body_text_mentioning_footers_kept():
     assert len(blocks) == 1  # 长正文不受页脚过滤影响
 
 
-# ── ACM/期刊版式页眉页脚家具块过滤（Survey 实测，2026-09-07）──────────
+# ── ACM/期刊版式页眉页脚家具块过滤──────────
 
 
 def test_acm_journal_footer_filtered():
@@ -530,7 +530,7 @@ def test_reference_with_initials_et_al_kept():
     assert blocks == [ref]  # 带逗号/缩写的引用条目不是页眉作者行，不得误杀
 
 
-# ── 列表项跨页续段（Survey 实测：贡献列表段落跨页续写）────────────────
+# ── 列表项跨页续段（贡献列表段落跨页续写）────────────────
 
 
 def test_merge_list_item_continuation():
@@ -554,7 +554,7 @@ def test_merge_list_item_continuation():
     )
 
 
-# ── run-in 引导标题拆分（Survey 实测：术语定义段 _Lead._ 正文）────────
+# ── run-in 引导标题拆分（术语定义段 _Lead._ 正文）────────
 
 
 def test_run_in_italic_lead_split():
@@ -587,14 +587,14 @@ def test_mid_sentence_emphasis_not_split():
     assert blocks == [text]  # 句中强调无终结符，不拆
 
 
-# ── 段融合检测（HippoRAG 实测：整批译文被塞进 <<<0>>> 标题段）──────────
+# ── 段融合检测（整批译文被塞进 <<<0>>> 标题段）──────────
 
 
 def test_fused_translation_detected():
     from translate.sanitize import is_fused_translation
     assert is_fused_translation(
-        "# **HippoRAG: Long-Term Memory for LLMs**",
-        "# **HippoRAG：大型语言模型的长期记忆**\n\n## 摘要\n\n摘要全文译文。\n\n"
+        "# **DEMO-RAG: Long-Term Memory for LLMs**",
+        "# **DEMO-RAG：大型语言模型的长期记忆**\n\n## 摘要\n\n摘要全文译文。\n\n"
         "## 引言\n\n引言全文译文。\n\n## 方法\n\n方法全文译文。",
     )
 
@@ -610,7 +610,7 @@ def test_fused_translation_normal_not_flagged():
 
 
 def test_fused_translation_heading_bloat_detected():
-    """ToG 实测（2026-09-07 晚）：标题译文后融进整段正文且无空行分段——
+    """ToG 实测：标题译文后融进整段正文且无空行分段——
     旧判据（译文 ≥3 空行分段）漏网，形状判据（短标题行 + 译文膨胀）补位。"""
     from translate.sanitize import is_fused_translation
     body = (

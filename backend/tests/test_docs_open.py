@@ -1,4 +1,4 @@
-"""阶段6-T3：open_cached_doc 缓存重建测试（不触网，纯缓存读写）。"""
+"""open_cached_doc 缓存重建测试（不触网，纯缓存读写）。"""
 
 import asyncio
 import tempfile
@@ -46,7 +46,7 @@ def test_rebuild_fills_translations_from_cache(monkeypatch):
             [
                 _block(
                     0,
-                    "# **DALK: Knowledge Agent**\n\nGraph neural networks help retrieval.",
+                    "# **DEMO: Knowledge Agent**\n\nGraph neural networks help retrieval.",
                 )
             ],
         ),
@@ -60,10 +60,10 @@ def test_rebuild_fills_translations_from_cache(monkeypatch):
 
     out = asyncio.run(open_cached_doc("h" * 40, 1, ""))
     assert out["file_exists"] is False
-    assert out["doc_title"] == "**DALK: Knowledge Agent**"
+    assert out["doc_title"] == "**DEMO: Knowledge Agent**"
     blocks = out["pages"][0]["blocks"]
     # 页眉剔除后标题块仍在（带 # 前缀的是真标题，不被剔除）
-    assert any("DALK" in b["original"] for b in blocks)
+    assert any("DEMO" in b["original"] for b in blocks)
     body = next(b for b in blocks if "Graph neural" in b["original"])
     assert body["translated"] == "图神经网络有助于检索。"
 
@@ -97,8 +97,8 @@ def test_extract_doc_title_skips_generic_headings():
     def mk(pages_text):
         return [{"page": 0, "blocks": [{"original": t} for t in pages_text]}]
 
-    pages = mk(["# Abstract", "# DALK: Dual Aligned Knowledge Graphs", "# 1 Introduction"])
-    assert _extract_doc_title(pages) == "DALK: Dual Aligned Knowledge Graphs"
+    pages = mk(["# Abstract", "# DEMO: Dual Aligned Knowledge Graphs", "# 1 Introduction"])
+    assert _extract_doc_title(pages) == "DEMO: Dual Aligned Knowledge Graphs"
     # 带编号/冒号的通用名也跳过
     assert _extract_doc_title(mk(["# 1 Introduction", "# Results: all good"])) == "Results: all good"
     # 全部是通用章节名 → 空串（索引回退文件名）
@@ -112,8 +112,8 @@ def test_extract_doc_title_skips_generic_headings():
     def mk(pages_text):
         return [{"page": 0, "blocks": [{"original": t} for t in pages_text]}]
 
-    pages = mk(["# Abstract", "# DALK: Dual Aligned Knowledge Graphs", "# 1 Introduction"])
-    assert _extract_doc_title(pages) == "DALK: Dual Aligned Knowledge Graphs"
+    pages = mk(["# Abstract", "# DEMO: Dual Aligned Knowledge Graphs", "# 1 Introduction"])
+    assert _extract_doc_title(pages) == "DEMO: Dual Aligned Knowledge Graphs"
     # 带编号/冒号的通用名也跳过
     assert _extract_doc_title(mk(["# 1 Introduction", "# Results: all good"])) == "Results: all good"
     # 全部是通用章节名 → 空串（索引回退文件名）

@@ -65,7 +65,7 @@ def test_openai_compat_call_mocked():
 
 
 def test_openai_compat_missing_key_raises():
-    """无 Key 显式报错（2026-09-09）：不再静默返回空译文。"""
+    """无 Key 显式报错：不再静默返回空译文。"""
     cfg = {"provider": "siliconflow", "api_key": "", "api_url": "x", "model": "m"}
     with pytest.raises(ValueError, match="翻译 API Key 未配置"):
         asyncio.run(translate_text("hello", "en", "zh", cfg))
@@ -77,7 +77,7 @@ def test_batch_short_circuits_empty():
     assert out == ["", ""]
 
 
-# ── JSON 数组结构化 I/O 协议（阶段12-T6：替代 <<<n>>> 分隔标记批量）─────
+# ── JSON 数组结构化 I/O 协议─────
 
 import json  # noqa: E402
 
@@ -173,7 +173,7 @@ def test_batch_fused_segment_retried_individually():
 
 
 def test_batch_glossary_filtered_to_hits():
-    """术语表按本批命中过滤：只注入出现的条目（阶段12-T6）。"""
+    """术语表按本批命中过滤：只注入出现的条目。"""
     p = OpenAICompatProvider()
     prompts: list[str] = []
 

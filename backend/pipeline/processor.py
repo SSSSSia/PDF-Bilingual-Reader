@@ -38,51 +38,51 @@ MAX_CONCURRENCY = 8
 # v2：提取内容增加 HTML 清理（<br>/<sup>/注释），旧缓存含脏数据需失效。
 # v3：图片策略改为图表区域快照（矢量图/碎栅格统一截图插回），markdown 内容变化。
 # v4：图表内部文字 redact 剔除（不再与快照图重复），markdown 内容变化。
-# v5：表格也按快照处理（文本表格转 markdown 必错位，用户决策），markdown 变化。
+# v5：表格也按快照处理，markdown 变化。
 # v6：快照按类型命名（tab_*/fig_*），sidecar 记录 kind 与源 PDF，markdown 变化。
 # v7：修复快照目录未创建导致 save 全部静默失败（首跑新文件无图无快照，TOG 实测）。
 # v8：区域合并加空隙容差（图内文字行隔开的绘图簇不再把一张图拆成多条横带）。
-# v9：清理 <u> 下划线标签（用户反馈"下划线还在"），markdown 内容变化。
-# v10：快照区域外扩 3pt（表格右缘数字被裁，HippoRAG Table 5 实测），快照内容变化。
+# v9：清理 <u> 下划线标签，markdown 内容变化。
+# v10：快照区域外扩 3pt（表格右缘数字被裁，Table 5 实测），快照内容变化。
 # v11：表格快照吸收上方表头行且 redact 与快照同区域（表头在正文残留被
 #      pymupdf4llm 再识别成小 markdown 表格，用户看到"表头翻译两遍"）。
-# v12：双栏页列感知阅读顺序重排（左栏→右栏；用户反馈"原文不全"：
+# v12：双栏页列感知阅读顺序重排（左栏→右栏；实测反馈"原文不全"：
 #      pymupdf4llm 按 y 带交错输出，段落续文被排离原段且页末脚注挡住
 #      旧版跨页合并），markdown 段落顺序变化。
 # v13：插图锚定收紧（caption 须带标点，正文 "Table 4 illustrates" 不再
 #      误当锚点）且改在列重排**前**执行（重排打乱第 k↔第 k 配对，实测
 #      Figure 3 快照配到 Table 4 caption），图片段随 caption 一起重排。
-# v15：伪标题降级（2026-09-08 用户反馈"这两句不是标题"）——大字号强调句
+# v15：伪标题降级——大字号强调句
 #      （研究问句等）被 pymupdf4llm 误判成 # 标题：巨字渲染+模型当标题
 #      翻一半。句子型标题降级为粗体段落，旧缓存需失效重提。
-# v16：斜体误判上标还原（ⁱⁿⁱtⁱal→initial 等）+ 跨栏粘连段拆分
+# v16：斜体误判上标还原（ⁱⁿⁱtⁱal→initial 等） + 跨栏粘连段拆分
 #      （EMNLP 版首页"摘要混在单位行"实测）。
-# v16→v17（2026-09-12 标题缺失根治）：textlayer 降级规则收窄（句法证据 +
+# v16→v17：textlayer 降级规则收窄（句法证据 +
 # 页 0 首标题豁免）与跨栏拆分标题段豁免——两处变更都改变提取产物，
 # 旧文本层缓存必须整体失效重建；翻译缓存按 text_hash 键控，未变化文本
 # 命中旧译文，仅标题等变化块重译一次
-# v17→v18（2026-09-13 提取栈钉扎）：pymupdf 1.28.2→1.26.4 / pymupdf4llm
+# v17→v18：pymupdf 1.28.2→1.26.4 / pymupdf4llm
 # 1.28.2→0.0.27，提取产物回归 classic 基线，旧文本层缓存整体失效重建
-# v18→v19（2026-09-14 阶段12-T4 识别引擎混合架构）：数字页主路线换
+# v18→v19：数字页主路线换
 # 「快照+遮罩 → PaddleOCR-VL 整页结构化解析 → 交叉校验降级」（公式定界
 # LaTeX/复杂版式完整度提升，见 docs/VLM结构化解析对比.md），textlayer
 # 变为降级路径；翻译缓存按 text_hash 键控，未变化文本免重译
-# v19→v20（2026-09-14 阶段12-T9.2 版面模型信号源）：DocLayout-YOLO 区域
+# v19→v20：DocLayout-YOLO 区域
 # 接入——abandon 遮罩+truth 扣除+输出剔除（版权/venue 段不再混入）、
 # title 提升编号定级（标题层级恢复）、table/figure 并入快照候选（无框表
 # 不再碎行混正文）；提取产物结构性变化，旧文本层缓存整体失效重建
-# v20→v21（2026-09-15 阶段12-T10 验收反馈）：①列感知重排三处修复——段落
+# v20→v21：①列感知重排三处修复——段落
 # ↔块匹配锚定（表格残块子串垃圾命中）、少数失配段跟随邻段（单字符措辞
 # 漂移不再令整页放弃重排）、版面 plain text 区域作栏判定兜底（右栏整栏
-# 一块的首页判得出双栏），DALK 首页标题/引言乱序根治；②快照区域版面仲裁
-# ——prompt 示例框（SubgraphRAG p22-29/DALK p17-18 实测）不再被误判图表
+# 一块的首页判得出双栏），标题/引言乱序根治；②快照区域版面仲裁
+# ——带边框的 prompt 示例框不再被误判图表
 # 快照吞掉正文。翻译缓存按 text_hash 键控，未变化文本免重译
-# v21→v22（2026-09-15 阶段12-T10 反馈 5/7，未部署前合并生效）：①交叉校验
-# F1→查全率/精确率双阈值（数学页 LaTeX 命令字母膨胀不再误杀——SubgraphRAG
-# p4 公式页 F1 0.895 被拒而查全率 0.9994，实测 29 页分布校准）+ 退化输出
+# v21→v22：①交叉校验
+# F1→查全率/精确率双阈值（数学页 LaTeX 命令字母膨胀不再误杀——
+# p4 公式页 F1 0.895 被拒而查全率 0.9994，实测 29 页分布校准） + 退化输出
 # （只回页码）一次性重试；②快照注释边界收夹——被卷进快照的 Figure/Table
-# 注释及其后正文放回文本流（SubgraphRAG p2 图1 实测：注释被遮罩致图甩
-# 页尾/注释未译），守卫保证不切割模型图表区域（DALK p8 维持现状）；
+# 注释及其后正文放回文本流（图1 实测：注释被遮罩致图甩
+# 页尾/注释未译），守卫保证不切割模型图表区域（维持现状）；
 # 受影响页产物变化，旧缓存失效重建
 TEXT_LAYER_MODEL = "text-layer-v22"
 
@@ -102,14 +102,14 @@ def _single_block(page: int, text: str) -> dict:
 
 _jobs: dict[str, dict] = {}
 
-# ── job 生命周期（阶段1-T4）──────────────────────────────────────────
+# ── job 生命周期──────────────────────────────────────────
 # 旧实现 _jobs 只增不减：每处理一份 PDF 就多一条含全部页面文本的记录，
 # 长期运行必然内存泄漏。策略：容量上限 + TTL 淘汰，且只淘汰已完成的 job
 #（运行中/轮询中的一律保留，前端 30 分钟轮询窗口内的任务绝不被淘汰）。
 MAX_JOBS = 50
 JOB_TTL_SECONDS = 2 * 60 * 60  # 完成后保留 2 小时，供前端/调试复查
 
-# 阶段11-T2 子集：全局翻译任务并发上限（前端 translationManager 本就收口
+# 子集：全局翻译任务并发上限（前端 translationManager 本就收口
 # 为 1，此守卫防多客户端/绕过前端场景叠加；超出后端直接拒绝并提示）
 MAX_RUNNING_JOBS = 2
 
@@ -119,7 +119,7 @@ def running_job_count() -> int:
 
 
 def list_running_jobs() -> list[dict]:
-    """运行中任务列表（阶段11-T5）：前端 F5 刷新丢失 job_id 后，
+    """运行中任务列表：前端 F5 刷新丢失 job_id 后，
     据此发现后端仍在跑的任务并自动重接管（attach）。"""
     return [
         {
@@ -161,14 +161,14 @@ async def run_pipeline(file_path: str, display_name: str | None = None) -> dict:
     启动一次处理任务。
     - 同一文件（内容哈希 + mtime）重复提交时复用已有任务，避免重复扣费。
     - 返回 job_id，由前端轮询 get_pipeline_status 获取结果。
-    - file_path 通常是文献库副本（上传即入库，T10 反馈 8）：display_name
+    - file_path 通常是文献库副本（上传即入库）：display_name
       保留用户原始文件名作标题（库副本以哈希命名，basename 不可展示）；
       返回 file_path 让前端会话采用库内路径（原文件此后可移动）。
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"文件不存在: {file_path}")
 
-    # 无 Key fail-fast（2026-09-09 用户问询"默认没配 Key 有没有异常处理"）：
+    # 无 Key fail-fast：
     # 缺任一 Key 直接拒绝启动，不让任务跑起来再失败——管线各环节的
     # per-block 容错（_translate_chunk 减半重试/单段落空、figtranslate
     # 保留原文）会把异常吞成空译文，表现为"翻译完成却没有译文"的静默错误。
@@ -198,14 +198,14 @@ async def run_pipeline(file_path: str, display_name: str | None = None) -> dict:
         "progress": 0,
         "pages": [],
         "error": None,
-        # 阶段11-T5：F5 后前端丢 job_id，凭 file_path 在 running 列表里发现并重接管
+        # F5 后前端丢 job_id，凭 file_path 在 running 列表里发现并重接管
         "file_path": file_path,
         "stats": {
             "ocr_cache_hit": 0,
             "ocr_total": 0,
             "tr_cache_hit": 0,
             "tr_total": 0,
-            # 阶段12-T4：VLM 主路线页数 / 交叉校验降级页数（前端进度页可见）
+            # VLM 主路线页数 / 交叉校验降级页数（前端进度页可见）
             "vlm_pages": 0,
             "vlm_fallback": 0,
         },
@@ -213,7 +213,7 @@ async def run_pipeline(file_path: str, display_name: str | None = None) -> dict:
 
     asyncio.create_task(_process_pipeline(file_path, job_id, pdf_hash))
 
-    # 阶段11-T5 扩展（用户方案）：上传即入库——此前翻译完成才登记，
+    # 扩展：上传即入库——此前翻译完成才登记，
     # 进行中的文档在文献库"消失"（F5/关开应用后无从发现）。早期登记的
     # doc_id 与完成时一致（pdf_hash[:16]），完成 upsert 按 doc_id 原地补全。
     try:
@@ -262,10 +262,10 @@ def _split_page(page: dict) -> dict:
     return {"page": page["page"], "blocks": blocks}
 
 
-# ── 跨页/跨栏段落续接合并（阶段2-T3，2026-09-07 升级）────────────────
+# ── 跨页/跨栏段落续接合并────────────────
 # 块切分按页/栏边界切断段落 → 残文两处显示。旧版只合并「前页末块+后页
 # 首块」，但页末常是脚注/页眉等结构性块，真正被切断的段落在中间，永远
-# 轮不到合并（DALK 首页实测）；跨栏切分（左栏底→右栏顶）同理。
+# 轮不到合并；跨栏切分（左栏底→右栏顶）同理。
 # 升级为对整个文档块序列做续段合并：
 #   A 未完结（末尾无终止符）时，向后跳过「可跳结构块」（图表快照/caption/
 #   脚注/表格行/列表，≤8 个）找合并目标；章节标题（# ##）是硬边界——
@@ -274,7 +274,7 @@ def _split_page(page: dict) -> dict:
 #   A 以虚词结尾且目标大写开头（"rich sources of | AD knowledge" 形态）。
 #   合并归属 A 的页。
 # caption（"Table 5: ..."）必须带标点才判结构块——"Table 4 illustrates"
-# 是正文段落（DALK 实测），不能误伤。
+# 是正文段落，不能误伤。
 _BLOCK_TERMINAL = tuple(".!?:。！？：；;\"')]）】")
 _STRUCT_START = re.compile(
     r"^(#{1,6}\s|\||!\[|[-*+]\s|\d+[.)]\s|>"
@@ -283,7 +283,7 @@ _STRUCT_START = re.compile(
 )
 _SKIP_STOP = re.compile(r"^#{1,2}\s")  # 章节标题：合并的硬边界
 _MERGE_SKIP_MAX = 8  # 最多跳过的结构块数（图表密集页实测需 4+）
-# 列表项可作为合并源（不能当合并目标）：Survey 实测列表项段落跨页续写
+# 列表项可作为合并源（不能当合并目标）：列表项段落跨页续写
 # （"- We delineate ... discussing both" + 次页 "the progress and ..."），
 # 一刀切排除会让列表项永远残缺
 _LIST_ITEM = re.compile(r"^[-*+]\s")
@@ -358,7 +358,7 @@ _PURE_IMAGE = re.compile(r"^\s*!\[[^\]]*\]\([^)]+\)\s*$")
 # 从图片引用中提取本地路径
 _IMG_PATH = re.compile(r"^\s*!\[[^\]]*\]\(([^)]+)\)\s*$")
 
-# 图表"译制图"开关（2026-09-06 用户决策：先取消，图表全部用原图）。
+# 图表"译制图"开关。
 # figtranslate.py 实现保留，置 True 可重新启用（左右对照=左原图右译图）。
 FIGURE_TRANSLATION_ENABLED = False
 
@@ -384,16 +384,16 @@ async def _translate_figure_block(original_md: str, file_path: str, t_cfg: dict)
 
 
 # 通用章节名（不区分大小写）：标题提取时跳过，防止「Abstract」这类
-# 被 pymupdf4llm 误判成顶级标题的章节头混进文档标题（2026-09-09 用户反馈）
+# 被 pymupdf4llm 误判成顶级标题的章节头混进文档标题
 # 通用节名词汇（标题几何证据/作者抑制共用）已移至提取层 ocr/textlayer.py
-# （阶段12 验收期修复），此处导入使用；_is_generic_heading 保留多级编号
+# ，此处导入使用；_is_generic_heading 保留多级编号
 # 章节头直接判非标题的文档标题语义。
 
 
 def _extract_doc_title(pages: list, file_path: str | None = None) -> str:
     """论文标题（管线与缓存重建共用）。
 
-    2026-09-12 标题根治：**几何证据优先**——第 1 页字号最大、最靠上的连续行
+    标题根治：**几何证据优先**——第 1 页字号最大、最靠上的连续行
     就是标题（学术排版铁律，对任何版式成立；PDF metadata 互证），文本启发式
     降为兜底。历史上的两级优先级（首个 # 标题块 / 首个正文块）保留为
     file_path 缺失或几何检测失败时的回退。
@@ -448,7 +448,7 @@ def _norm_title(s: str) -> str:
 
 
 def _ensure_title_heading(pages: list, doc_title: str) -> None:
-    """页 0 标题块矫正（2026-09-12 标题根治）：几何证据认定的标题若在首页
+    """页 0 标题块矫正：几何证据认定的标题若在首页
     以纯文本块存在（textlayer 降级/拆分历史误伤形态），提升为 "# " 标题块
     ——读者看到的与证据认定的一致。必须在页眉剔除之前调用（裸标题块
     与 doc_title 相同会被 _remove_running_header 当页眉吃掉）。"""
@@ -493,7 +493,7 @@ def _remove_running_header(pages: list, doc_title: str) -> None:
 
 
 async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dict) -> list:
-    """混合提取 + 页级流式挂载（阶段1-T5；阶段12-T4 数字页主路线换 VLM）：
+    """混合提取 + 页级流式挂载：
 
     1. 数字页主路线：PaddleOCR-VL 整页结构化解析（快照→遮罩→解析→
        交叉校验，bag<阈值/空输出/API 失败整页回退 textlayer——最坏=现状，
@@ -529,7 +529,7 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
 
     vlm_cfg = config.get("vlm") or {}
     vlm_enabled = vlm_cfg.get("enabled", True) and bool(config.get("api_key"))
-    # 配置键沿用 bag_threshold（历史名），语义=交叉校验查全率阈值（T10 反馈 5）
+    # 配置键沿用 bag_threshold（历史名），语义=交叉校验查全率阈值
     bag_threshold = float(vlm_cfg.get("bag_threshold", 0.90))
     sem = asyncio.Semaphore(vlm_parse.CONCURRENCY)
     pending: dict[int, asyncio.Task] = {}
@@ -570,9 +570,9 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
                 else:
                     vision_pages.append(i)
 
-    # 版面模型信号源（阶段12-T9.2）：VLM 页统一取一次 DocLayout-YOLO 区域
+    # 版面模型信号源：VLM 页统一取一次 DocLayout-YOLO 区域
     # （子进程跑随包 babeldoc 运行时，缓存优先）。必须在建页任务**之前**
-    # start——regions() 依赖 start 创建的页级 future，早于 start 调用会
+    # start——regions 依赖 start 创建的页级 future，早于 start 调用会
     # 恒 None（竞态防复发）。任何失败都只是退回无版面信号行为。
     layout = None
     job["stats"].setdefault("layout_pages", 0)
@@ -699,14 +699,14 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
         doc_title = _extract_doc_title(pages, file_path)
         # 页0标题块矫正（提升为 # heading）必须在页眉剔除之前
         _ensure_title_heading(pages, doc_title)
-        # 页眉运行标题（ACM/期刊版式每页重复的裸标题行，Survey 实测每页
+        # 页眉运行标题（ACM/期刊版式每页重复的裸标题行，每页
         # 一块、还被模型回声成"假译文"）：与文档标题相同的块剔除。
         # 真标题块带 "# " 前缀不受影响；比对时去掉 markdown 强调符
         # （标题块是 "# **Title**" 而页眉是裸文本）
         _remove_running_header(pages, doc_title)
-        # 跨页段落合并（阶段2-T3）：紧跟模式不再把跨页同段显示成两块残文
+        # 跨页段落合并：紧跟模式不再把跨页同段显示成两块残文
         pages = _merge_cross_page(pages)
-        # 原版对照模式（阶段5-T1，D6）：为每个最终块标注页面坐标 bbox，
+        # 原版对照模式：为每个最终块标注页面坐标 bbox，
         # 前端 pdfjs 原版渲染后按坐标叠加高亮/译文浮层。前缀匹配失败
         # （公式碎块/图内文字/扫描页）→ None，只是不高亮，不损失内容。
         try:
@@ -723,7 +723,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
         source_lang = t_cfg.get("source_language", "zh")
         model = t_cfg.get("model", "")
 
-        # 术语表两遍法 Pass 0（阶段2-T4）：全文翻译前先抽术语，注入系统提示词。
+        # 术语表两遍法 Pass 0：全文翻译前先抽术语，注入系统提示词。
         # 失败自动降级直译（glossary 返回 {}），绝不阻塞主链路。
         from translate.glossary import build_glossary
 
@@ -735,7 +735,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
             t_cfg["doc_title"] = doc_title
 
         # 先收集所有需要翻译的 block（跳过空白、纯图片与已缓存的）
-        # 元组第 4 位 = 该块所处的当前小节标题（阶段12-T6：注入系统
+        # 元组第 4 位 = 该块所处的当前小节标题（注入系统
         # 提示词做术语消歧的近端语境，随块顺序滚动更新）
         pending: list[tuple] = []  # (page, block, cache_key, section)
         fig_jobs: list[tuple] = []  # (block, cache_key, Task)——译制图与文本块并发
@@ -743,7 +743,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
         for page in pages:
             for block in page["blocks"]:
                 original = (block.get("original") or "").strip()
-                # 数学字母区规范化（2026-09-08）：𝒩→N、𝑥→x，翻译模型与
+                # 数学字母区规范化：𝒩→N、𝑥→x，翻译模型与
                 # 公式保护都不再被怪字符干扰；在缓存键计算前做，全文管线
                 # 与单块重翻键一致。改动会使旧缓存自然失效重翻（期望行为）
                 original = sanitize.normalize_math_letters(original)
@@ -781,9 +781,9 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                                 )
                             )
                     continue
-                # 公式密集块（阶段2-T5）：数学碎片翻译毫无意义，译文=原文。
+                # 公式密集块：数学碎片翻译毫无意义，译文=原文。
                 # formula_hint 标记（前端出「式」按钮按需 OCR 识别 LaTeX）；
-                # 识别过的块直接回填 LaTeX（按需结果的持久化，重开不丢，2026-09-08）
+                # 识别过的块直接回填 LaTeX
                 if sanitize.is_formula_block(original):
                     block["translated"] = original
                     block["formula_hint"] = True
@@ -801,7 +801,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                         if cached_latex:
                             block["translated"] = cached_latex
                     continue
-                # 数学密集混合块（2026-09-08）：散文+行内公式，行内数学在
+                # 数学密集混合块：散文+行内公式，行内数学在
                 # 提取层已拍平（◆/𝑥/_x_^），照常翻译救不回结构——只打标，
                 # 前端出「式」按钮走视觉重识别，识别结果替换原文后自动重译
                 if sanitize.has_heavy_math(original):
@@ -815,12 +815,12 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                     cached
                     and cached.get("translated")
                     # 历史缓存中的回声条目视为未翻译：重新走翻译+补翻，
-                    # 避免英文原文被当译文常年展示（2026-09-07 修复）
+                    # 避免英文原文被当译文常年展示
                     and not sanitize.is_echo(
                         original, cached["translated"], target_lang
                     )
                     # 融合条目（批量翻译时整批译文塞进单段）同样重翻：
-                    # HippoRAG 标题块译文曾带摘要/引言/方法全文（2026-09-07）
+                    # 标题块译文曾带摘要/引言/方法全文
                     and not sanitize.is_fused_translation(
                         original, cached["translated"]
                     )
@@ -844,13 +844,13 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
             nonlocal done
             async with sem:
                 texts = [b["original"] for _, b, _, _ in chunk]
-                # 小节语境注入（阶段12-T6）：取块组内最靠后的非空小节
+                # 小节语境注入：取块组内最靠后的非空小节
                 # （最接近本批结尾的阅读位置）；浅拷贝配置避免并发污染
                 section = next(
                     (s for _, _, _, s in reversed(chunk) if s), ""
                 )
                 cfg = dict(t_cfg, section=section) if section else t_cfg
-                # 公式保护（阶段2-T5）：LaTeX 定界式 + 数学碎片 token 占位后
+                # 公式保护：LaTeX 定界式 + 数学碎片 token 占位后
                 # 送翻（正文照常翻译），译文回来再原样还原
                 protected = [sanitize.protect_formulas(t) for t in texts]
                 try:
@@ -888,11 +888,11 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                         )
                     )
                     # 回声（模型原样照抄原文）不落缓存：否则下轮缓存命中
-                    # 直接展示英文原文当译文，且永远绕过补翻（Survey 实测：
-                    # 参考文献整节回声落缓存，2026-09-07）
+                    # 直接展示英文原文当译文，且永远绕过补翻（
+                    # 参考文献整节回声落缓存）
                     # 融合译文同样不落缓存：标题块吞正文的单段膨胀形态
                     # 曾落缓存，此后每轮命中每轮展示（ToG 摘要实测
-                    # 2026-09-07 晚）
+                    # 晚）
                     _orig = block.get("original") or ""
                     if not sanitize.is_echo(
                         _orig,
@@ -906,8 +906,8 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                     if advance:
                         done += 1
                         # 钳制在 99：补翻等后置阶段不应把进度顶过 100
-                        # （用户实测"进度条卡出 100% 还在加"——补翻轮复用
-                        # 本函数把 done 二次累加所致，2026-09-07）
+                        # （实测"进度条卡出 100% 还在加"——补翻轮复用
+                        # 本函数把 done 二次累加所致）
                         job["progress"] = min(
                             99, 30 + int(done / total * 70)
                         )
@@ -953,7 +953,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
             retry_chunks = [retry[i : i + 10] for i in range(0, len(retry), 10)]
             try:
                 # advance=False：补翻不计进度——否则 done 二次累加，
-                # 进度条冲破 100% 还持续上涨（用户实测，2026-09-07）
+                # 进度条冲破 100% 还持续上涨
                 await asyncio.gather(
                     *[_translate_chunk(c, advance=False) for c in retry_chunks]
                 )
@@ -984,7 +984,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                 elif isinstance(out, Exception):
                     print(f"[figure] 译制图任务失败（回退原图）: {out}")
 
-        # 公式自动后处理（用户建议的"二次翻译"，2026-09-08）：文本翻译完成后
+        # 公式自动后处理：文本翻译完成后
         # 对 formula_hint 块自动跑视觉识别——纯公式块结果直接进译文位；数学
         # 密集混合块识别结果（英文正文+$..$）替换原文并自动单块重译。识别按
         # 内容寻址缓存幂等（重跑零成本）；失败块保留现状，可手动「式」重试。
@@ -1064,7 +1064,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
         job["progress"] = 100
         job["finished_at"] = time.time()
 
-        # 阶段6-T2：持久化文档索引（主页"已翻译文章"列表的数据源）。
+        # 持久化文档索引（主页"已翻译文章"列表的数据源）。
         # 结果此前只存内存 _jobs（TTL 淘汰），重启即失；索引写入失败
         # 只影响主页列表，绝不阻断主链路。
         try:
@@ -1074,7 +1074,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
                 settings.data_dir,
                 {
                     "doc_id": pdf_hash[:16],
-                    # 2026-09-09 用户决策：索引标题直接用上传文件名（去 .pdf），
+                    # 既定决策：索引标题直接用上传文件名（去 .pdf），
                     # 想改名就改文件名。提取的 doc_title 只用于术语表提示词
                     # 与页眉剔除，不再决定卡片标题。
                     "title": os.path.splitext(
@@ -1097,7 +1097,7 @@ async def _process_pipeline(file_path: str, job_id: str, pdf_hash: str):
 
 
 async def open_cached_doc(pdf_hash: str, page_count: int, file_path: str) -> dict:
-    """阶段6-T3：从缓存重建已翻译文档（主页点卡片秒开）。
+    """从缓存重建已翻译文档（主页点卡片秒开）。
 
     - 不跑 OCR、不发任何翻译 API 请求：页面块来自页级 OCR 缓存
       （文本层伪模型名优先，扫描页视觉缓存兜底），译文按当前配置的

@@ -1,16 +1,16 @@
-"""列感知阅读顺序重排回归测试（阶段12-T10 验收反馈，2026-09-15）。
+"""列感知阅读顺序重排回归测试。
 
-用户验收反馈：DALK 首页标题/引言顺序乱。根因链（四层叠加）：
+用户验收反馈：标题/引言顺序乱。根因链（四层叠加）：
 1. VLM 整页解析偶发乱序（引言在标题前，PaddleOCR-VL 免费档改不了）；
 2. `_match_block` 无锚定包含：表格残块（"C %"→norm "c"）子串命中几乎所有
-   段落（DALK p8 实测 6 段全配到一个 w=17 残块，排序 key 全为垃圾坐标）；
+   段落（6 段全配到一个 w=17 残块，排序 key 全为垃圾坐标）；
 3. 重排守卫「任一文本段失配即整页放弃」：单字符措辞漂移（PDF 原文拼错
    "Constributions"、VLM 输出 "Contributions"）就令整页维持乱序；
 4. 栏判定只认块级左右各 ≥3 窄块：右栏整栏一个粗粒度文本块的首页判不出
-   双栏（DALK 首页 rights=1），重排仍被拦。
+   双栏（rights=1），重排仍被拦。
 
 修法（类级通用，非个案）：匹配锚定 + 少数失配段跟随邻段 + 版面模型
-plain text 区域作栏判定兜底信号。用例几何取自 DALK 首页实测坐标。
+plain text 区域作栏判定兜底信号。用例几何取自 坐标。
 """
 
 import re
@@ -35,7 +35,7 @@ def _norms(raw_blocks):
 
 def test_match_block_rejects_tiny_block_spurious_hit():
     """短块（"C %"→"c"）不得被子串包含命中任意段落——旧逻辑 `t[:24] in h`
-    对 1 字符块恒真，DALK p8 六个段落全配到表格残块上。"""
+    对 1 字符块恒真，六个段落全配到表格残块上。"""
     raw_blocks = [
         (489, 111, 506, 123, "C %"),  # 表格残块（norm 后仅 "c"）
         (70, 182, 524, 206, "Table 5: An example for the case study"),
@@ -64,12 +64,12 @@ def test_match_block_short_head_returns_none():
     assert _match_block("2187", norms, alpha) is None  # 头不含于任何块
 
 
-# ── 重排守卫放宽 + 区域栏判定（根因 1/3/4，DALK 首页几何）───────────
+# ── 重排守卫放宽 + 区域栏判定（根因 1/3/4，几何）───────────
 
-# DALK 首页实测块几何（页宽 595）：标题/作者通栏，左栏摘要→引言→脚注，
+# 块几何（页宽 595）：标题/作者通栏，左栏摘要→引言→脚注，
 # 右栏整栏一个粗粒度文本块（rights=1，块级栏判定必失败）
 RAW_BLOCKS = [
-    (102, 67, 493, 102, "DALK: Dynamic Co-Augmentation of LLMs and KG"),
+    (102, 67, 493, 102, "DEMO: A Co-Augmentation Framework of LLMs and KG"),
     (113, 105, 481, 150, "Dawei Li, Shu Yang, Zhen Tan"),
     (158, 219, 202, 235, "Abstract"),
     (88, 244, 274, 566, "Recent advancements in large language models"),
@@ -92,7 +92,7 @@ SCRAMBLED_MD = (
     "1 Introduction\n\n"
     "Alzheimer's Disease (AD) is a neurodegenerative disorder\n\n"
     "* Equal Contributions\n\n"
-    "DALK: Dynamic Co-Augmentation of LLMs and KG\n\n"
+    "DEMO: A Co-Augmentation Framework of LLMs and KG\n\n"
     "Dawei Li, Shu Yang, Zhen Tan\n\n"
     "Abstract\n\n"
     "Recent advancements in large language models\n\n"
@@ -109,7 +109,7 @@ def test_reorder_with_region_signal_and_minority_drift():
     漂移脚注跟随其前邻段（不跨页乱跳、不挡整页重排）。"""
     out = _column_reading_order(RAW_BLOCKS, SCRAMBLED_MD, col_rects=COL_RECTS)
     paras = _paras(out)
-    assert paras[0].startswith("DALK: Dynamic"), f"文档标题应居首: {paras[0][:30]!r}"
+    assert paras[0].startswith("DEMO: A"), f"文档标题应居首: {paras[0][:30]!r}"
     assert paras[1].startswith("Dawei Li"), "作者行应紧跟标题"
     assert paras[2] == "Abstract"
     i_intro = next(i for i, p in enumerate(paras) if p == "1 Introduction")

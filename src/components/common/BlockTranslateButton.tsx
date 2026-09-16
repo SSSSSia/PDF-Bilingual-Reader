@@ -5,7 +5,7 @@ import { translateBlock } from "../../lib/bridge";
 import type { TextBlock } from "../../types";
 
 /**
- * 块级手动翻译按钮（2026-09-07 用户需求）：
+ * 块级手动翻译按钮：
  * 悬停原文段落时显示——未翻译显示「译」，已翻译显示「重译」；
  * 点击调 /api/block/translate 单块翻译/重翻，结果就地替换显示，
  * 后端同时写回块级缓存（重开文档不丢）。

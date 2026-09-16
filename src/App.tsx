@@ -19,9 +19,9 @@ function App() {
   const { isConfigured, configLoaded, config, loadConfig } = useConfigStore();
   const { theme, setTheme } = useUiStore();
 
-  // 启动过渡收尾（2026-09-12 反馈②）：React 已挂载——移除 index.html 静态
+  // 启动过渡收尾：React 已挂载——移除 index.html 静态
   // splash 并显示窗口（tauri.conf visible:false 起始隐藏，替代 ~3s 白屏）。
-  // 放在最前的 effect 以尽早 show()；浏览器 dev 无窗口可显，仅移除 splash。
+  // 放在最前的 effect 以尽早 show；浏览器 dev 无窗口可显，仅移除 splash。
   useEffect(() => {
     document.getElementById("splash")?.remove();
     if ("__TAURI_INTERNALS__" in window) {
@@ -34,7 +34,7 @@ function App() {
   }, []);
 
   // 全局错误上报：渲染外未捕获的异常/Promise 拒绝落到后端 frontend.log，
-  // 打包 exe 无控制台时这是排查"页面崩溃"的主要线索（2026-09-09 用户反馈崩溃）
+  // 打包 exe 无控制台时这是排查"页面崩溃"的主要线索
   useEffect(() => {
     const onError = (e: ErrorEvent) => {
       logFrontend(
@@ -54,7 +54,7 @@ function App() {
     };
   }, []);
 
-  // 阶段6-T1：启动时从 config.json（后端单一来源）灌入一次配置。
+  // 启动时从 config.json（后端单一来源）灌入一次配置。
   // Key 已配置则 isConfigured 立即为真，主流程不再出现任何 Key 提示；
   // 仅当「已加载且确无 Key」时路由守卫才导向 /config。
   useEffect(() => {
@@ -78,12 +78,12 @@ function App() {
     <Navigate to="/config" replace />
   );
 
-  // 后端就绪门（2026-09-13 用户实测首启永挂修复）：打包版 sidecar 是 66MB
+  // 后端就绪门：打包版 sidecar 是 66MB
   // onefile，首次启动需解压引导 + Defender 扫描新装 exe，可能耗时数十秒——
   // 此前文献库等首查失败无重试，永挂"加载文献库…"。就绪前全屏等待，
   // 不渲染任何会话发请求的页面。浏览器 dev 模式后端由脚本预先拉起，跳过。
   // 注意：本组件的所有 hook 必须先于此早退声明（hook 数量跨渲染必须一致，
-  // 否则就绪翻转时 React 直接崩树——2026-09-13 打包版白屏根因）。
+  // 否则就绪翻转时 React 直接崩树——打包版白屏根因）。
   const [backendReady, setBackendReady] = useState(!isTauri());
   useEffect(() => {
     if (!isTauri()) return;
@@ -100,7 +100,7 @@ function App() {
     };
   }, []);
 
-  // 阶段11-T5 翻译任务自动重接管：F5 整页重载后前端 job_id 丢失，后端任务
+  // 翻译任务自动重接管：F5 整页重载后前端 job_id 丢失，后端任务
   // 孤儿化继续跑。配置加载完成后查一次 running 列表，发现未完成任务弹自绘
   // 确认，确认后 attach 恢复进度与流式渲染；忽略/无任务均不打扰。
   const [reattach, setReattach] = useState<{
@@ -120,7 +120,7 @@ function App() {
           listRunningTranslations(),
           listRunningExports(),
         ]);
-        // BabelDOC 运行中：静默重接管（无需用户决策，进度卡在其模式内呈现；
+        // BabelDOC 运行中：静默重接管（无需既定决策，进度卡在其模式内呈现；
         // 用户点忽略也不丢——任务照跑，产物完成自动落缓存）
         const ex = exports[0];
         if (ex) {

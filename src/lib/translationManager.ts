@@ -5,7 +5,7 @@ import { useLibraryStore } from "../stores/libraryStore";
 import type { PipelineResult, PageResult } from "../types";
 
 /**
- * 翻译管理器（阶段8-T2 多会话阅读）：轮询循环从 useOcr（组件闭包）迁到
+ * 翻译管理器：轮询循环从 useOcr（组件闭包）迁到
  * 模块级后台任务——翻译进行中用户可自由切换/打开其他文献（会话快照交换），
  * 轮询结果写会话注册表，仅当该会话是当前活跃会话时才镜像到 pdfStore。
  *
@@ -21,8 +21,8 @@ const MAX_POLL_ERRORS = 3;
 /**
  * 提取阶段完成阈值（后端 progress 里程碑：8=逐页提取开始、30=提取完成、
  * 100=翻译完成，见 backend/pipeline/processor.py）。进入阅读页的门禁取
- * 31 而非 30：30 只是提取完成的临界值，用户实测此刻排版尚未彻底定型
- * （2026-09-12 阶段11-T6）。主页进度卡自动跳转与标题栏 tab 门禁共用。
+ * 31 而非 30：30 只是提取完成的临界值，实测此刻排版尚未彻底定型
+ * 。主页进度卡自动跳转与标题栏 tab 门禁共用。
  */
 export const EXTRACT_DONE = 31;
 
@@ -33,7 +33,7 @@ export function currentTranslationKey(): string | null {
   return runningKey;
 }
 
-/** pages 渐进签名（阶段1-T1 去抖，自 useOcr 原样迁移） */
+/** pages 渐进签名 */
 function progressiveSignature(pages: PageResult[]): number {
   let translated = 0;
   let total = 0;
@@ -47,12 +47,12 @@ function progressiveSignature(pages: PageResult[]): number {
 }
 
 /**
- * 轮询结果写入活跃 pdfStore（阶段11-T1 局部更新）。
+ * 轮询结果写入活跃 pdfStore。
  * 后端每次返回全量 pages，若整表 setPages 会让数百个块卡片全量重渲染
- * （阶段11 P1 卡顿根因）。改为与 store 现有 pages 按 (page, block_id) diff：
+ * 。改为与 store 现有 pages 按 (page, block_id) diff：
  * - 结构变化（提取阶段新页/新块渐进到达）：兜底整表 setPages；
  * - 仅内容变化（译文流入/原文替换/公式标记）：applyBlockPatches 单次批量补丁，
- *   未触及块引用不变 → React.memo 行组件跳过重渲染。
+ * 未触及块引用不变 → React.memo 行组件跳过重渲染。
  * 会话快照 updateSnapshot 仍存轮询全量 pages，captureActive/activate 语义不变。
  */
 function applyPagesToStore(pages: PageResult[]): void {
@@ -157,7 +157,7 @@ export async function startTranslation(
     return { ok: false, reason: "后端未返回 job_id，无法跟踪处理进度" };
   }
 
-  // 上传即入库（T10 反馈 8）：会话改用文献库副本路径（<data_dir>/files/
+  // 上传即入库：会话改用文献库副本路径（<data_dir>/files/
   // <哈希>.pdf）——原文件移动/改名/删除后原版模式/对照/导出不受影响；
   // 显示名不变（仍是用户选的文件名）
   const libPath = start.file_path || filePath;
@@ -188,7 +188,7 @@ export async function startTranslation(
 }
 
 /**
- * 重接管仍在运行的翻译任务（阶段11-T5）：F5 整页重载后前端 job_id 丢失，
+ * 重接管仍在运行的翻译任务：F5 整页重载后前端 job_id 丢失，
  * 由 App 启动时的 running 列表发现后调用。复用 poll 循环；会话注册表在
  * 刷新后已清空，此处重新注册（镜像语义与 startTranslation 一致）。
  * 约束：不改 run_pipeline 幂等逻辑——后端 job 一直在跑，接管只是"续看"。

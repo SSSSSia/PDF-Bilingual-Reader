@@ -7,14 +7,14 @@ import { useBabelDocStore } from "../../stores/babeldocStore";
 import { EXTRACT_DONE, currentTranslationKey } from "../../lib/translationManager";
 
 /**
- * 自绘标题栏（阶段10-T3；2026-09-10 验收反馈二次改造）：
- * 靠岸学术式——标题栏 = 「应用 logo + 文章多开 tab + 窗口三钮」。
- * - tab = 阶段8 会话注册表中的每篇打开文献/翻译任务：点击切换、× 关闭、
- *   「+」回主页新开；后台 tab 挂起保留翻译进度（进度徽标）。
+ * 自绘标题栏：
+ * 布局：标题栏 = 「应用 logo + 文章多开 tab + 窗口三钮」。
+ * - tab = 会话注册表中的每篇打开文献/翻译任务：点击切换、× 关闭、
+ * 「+」回主页新开；后台 tab 挂起保留翻译进度（进度徽标）。
  * - 原 ReaderTabs 页签条在 Tauri 下退役（由本栏承担）；浏览器 dev 保留。
  * - 仅 Tauri 环境渲染整栏（浏览器 dev 无 decorations:false，无需窗口钮）
  * - 整栏为拖拽区（data-tauri-drag-region，权限 core:window:allow-start-dragging
- *   ——2026-09-10 验收发现漏权限导致窗口拖不动，已补 capability）
+ * ——验收发现漏权限导致窗口拖不动，已补 capability）
  * - 双击最大化切换；关闭钮 hover 红色语义（桌面软件惯例）
  */
 export default function TitleBar() {
@@ -26,7 +26,7 @@ export default function TitleBar() {
   const sessions = useSessionsStore((s) => s.sessions);
   const activate = useSessionsStore((s) => s.activate);
   const closeSession = useSessionsStore((s) => s.close);
-  // BabelDOC 全局进度徽标（T10 反馈 6 改进 1）：任务运行中任何界面可见，
+  // BabelDOC 全局进度徽标（改进 1）：任务运行中任何界面可见，
   // 点击回到该文档的「原版对照」视图看进度——解决「切走后像暂停了」
   const bdoc = useBabelDocStore();
   const [maximized, setMaximized] = useState(false);
@@ -71,7 +71,7 @@ export default function TitleBar() {
   const ordered = [...sessions].sort((a, b) => a.createdAt - b.createdAt);
 
   const handleActivate = (key: string) => {
-    // 阶段11-T6 门禁：提取未完成（progress<EXTRACT_DONE，排版未定型）的
+    // 门禁：提取未完成（progress<EXTRACT_DONE，排版未定型）的
     // 翻译中 tab 不进阅读页。不在阅读页时仅激活（留在当前页看进度卡）；
     // 已在阅读页则整次忽略——激活会把提取中的半成品 pages 换进正看的文章
     const s = sessions.find((x) => x.key === key);
@@ -117,7 +117,8 @@ export default function TitleBar() {
       onDoubleClick={() => win?.toggleMaximize()}
       className="flex h-10 shrink-0 select-none items-center gap-1 border-b border-slate-200 bg-slate-50 pl-2.5 dark:border-slate-700 dark:bg-slate-900"
     >
-      {/* logo + 应用名：点击返回主页（同靠岸学术） */}
+      {/* logo + 应用名：点击返回主页 */}
+
       <Link
         to="/"
         className="mr-1 flex shrink-0 items-center gap-1.5 rounded px-1 py-0.5"
@@ -135,13 +136,14 @@ export default function TitleBar() {
       </Link>
 
       {/* 文章多开 tab（会话注册表）：点击切换 / × 关闭；无会话时回退页面标题 */}
+
       {ordered.length > 0 ? (
         <div className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5">
           {ordered.map((s) => {
             const active = s.key === sessionKey;
             // 运行中 = 状态 running 且是当前活跃翻译任务（同一时间仅 1 个）。
             // 状态 running 但不属于活跃任务的是轮询已死亡的冻结残留——
-            // 按中断呈现（红点、不显示冻结时的假百分比），2026-09-12 用户反馈
+            // 按中断呈现（红点、不显示冻结时的假百分比），实测反馈
             const running = s.job?.status === "running" && s.key === currentTranslationKey();
             const interrupted = s.job?.status === "running" && !running;
             const failed = s.job?.status === "failed" || interrupted;
@@ -165,7 +167,7 @@ export default function TitleBar() {
                       ? "翻译已中断，重新打开该文档可继续"
                       : s.title
                 }
-                // 等宽页签（2026-09-15 用户反馈"标签大小不一样"）：标题
+                // 等宽页签：标题
                 // 长度/运行态按钮切换不再影响外宽，标题区截断、悬停看全名
                 className={`group flex h-7 w-36 shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors duration-150 ${
                   active
@@ -224,6 +226,7 @@ export default function TitleBar() {
       )}
 
       {/* BabelDOC 生成中：全局进度徽标（跨文档可见，点击跳回该文档对照视图） */}
+
       {bdoc.phase === "running" && (
         <button
           onClick={jumpToBabeldoc}
@@ -243,8 +246,10 @@ export default function TitleBar() {
       )}
 
       {/* 拖拽空白区 */}
+
       <div className="h-full flex-1" data-tauri-drag-region />
       {/* 窗口控制三钮（占满标题栏高度，点击区不触发拖拽） */}
+
       <div className="flex h-full items-center" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => win?.minimize()}

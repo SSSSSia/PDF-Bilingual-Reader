@@ -3,9 +3,9 @@ import { AppConfig } from "../types";
 import { loadConfig, saveConfig } from "../lib/bridge";
 
 /** 单个 API 区块的连通性测试结果（spec 记录测试时的表单值：
- *  用户测完又改动地址/Key/模型则视为未测试）。放全局 store：
- *  保存后的自动补测若被用户切页打断，结果不随组件卸载丢失，
- *  返回设置页仍可见（2026-09-11 用户反馈）。 */
+ * 用户测完又改动地址/Key/模型则视为未测试）。放全局 store：
+ * 保存后的自动补测若被用户切页打断，结果不随组件卸载丢失，
+ * 返回设置页仍可见。 */
 export interface SectionTest {
   state: "idle" | "testing" | "ok" | "fail";
   msg: string;
@@ -13,9 +13,9 @@ export interface SectionTest {
 }
 
 /**
- * 配置单一来源（阶段6-T1）：后端 config.json（%APPDATA%/pdf-reader/）是唯一事实来源，
+ * 配置单一来源：后端 config.json（%APPDATA%/pdf-reader/）是唯一事实来源，
  * 前端不持久化任何配置副本（无 localStorage），仅内存镜像：
- * - 启动时 App.tsx 调用 loadConfig() 灌入一次 → isConfigured 立即为真，主流程不再提示补填；
+ * - 启动时 App.tsx 调用 loadConfig 灌入一次 → isConfigured 立即为真，主流程不再提示补填；
  * - 仅用户在设置页显式保存 / 切主题时才回写（saveConfig → config.json）。
  * configLoaded 区分「还没加载完」与「已加载但未配置」，避免启动瞬间误报"请先配置"。
  */

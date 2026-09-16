@@ -43,7 +43,7 @@ fn main() {
             commands::test_api_connection,
         ])
         .setup(|_app| {
-            // ── 窗口尺寸自适应（2026-09-13 用户反馈"启动页面太大"）────
+            // ── 窗口尺寸自适应────
             // 1400x900 在小屏/缩放屏上超出可视区：钳制到工作区 90% 并居中
             {
                 use tauri::Manager;
@@ -76,7 +76,7 @@ fn main() {
                 use tauri_plugin_shell::ShellExt;
                 use tauri_plugin_shell::process::CommandEvent;
 
-                // 启动前清理残留 sidecar（2026-09-13 用户反馈"端口经常被占"）：
+                // 启动前清理残留 sidecar：
                 // 退出路径不全时（直接关窗/强杀/崩溃）RunEvent::Exit 不触发，
                 // 旧 pdf-backend.exe 成孤儿占住 8000，导致本次 sidecar 绑定
                 // 失败 + 升级安装器写文件失败。只清自己名下的进程名，不碰

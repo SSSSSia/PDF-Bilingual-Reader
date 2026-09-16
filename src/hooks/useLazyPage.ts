@@ -3,15 +3,15 @@ import { useEffect, useRef, useState } from "react";
 export type PageLayout = { scale: number; w: number; h: number };
 
 /**
- * 单页懒渲染（阶段7-T4 自 OriginalReader 的 OriginalPage 抽出，
+ * 单页懒渲染（自 OriginalReader 的 OriginalPage 抽出，
  * 原版点击翻译 / 原版左右对照两种形态共用）：
  * - 接近视口才启动渲染（IntersectionObserver rootMargin 600px），
- *   长文档连续滚动不卡；渲染任务可取消（task.cancel）防止
- *   快速滚动/改缩放时的渲染竞态；
+ * 长文档连续滚动不卡；渲染任务可取消（task.cancel）防止
+ * 快速滚动/改缩放时的渲染竞态；
  * - fit-width × devicePixelRatio × zoom：canvas 物理像素按 dpr 放大
- *   保证高清，CSS 尺寸按逻辑 scale 定位——overlay 坐标 = bbox(pt) × scale；
+ * 保证高清，CSS 尺寸按逻辑 scale 定位——overlay 坐标 = bbox(pt) × scale；
  * - renderW 为滚动容器测量宽（fit-width 基准），48 = 页面列容器
- *   横向留白（px-4 的 32 + 视觉边距 16），与 OriginalReader 宽度公式同源。
+ * 横向留白（px-4 的 32 + 视觉边距 16），与 OriginalReader 宽度公式同源。
  *
  * 返回 layout/rotated 供调用方上报（如左右对照右栏镜像几何依赖）。
  */

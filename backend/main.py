@@ -18,7 +18,7 @@ import uuid
 import httpx
 
 # 冻结态（PyInstaller）stderr/stdout 尽早落盘：onefile + GUI 子系统下若崩溃
-# 发生在任何日志管道建立之前将无任何痕迹（2026-09-13 排查 sidecar 段错误的
+# 发生在任何日志管道建立之前将无任何痕迹（排查 sidecar 段错误的
 # 教训）。放在模块顶部，让导入期崩溃也能留下遗言。
 if getattr(sys, "frozen", False):
     try:
@@ -62,7 +62,7 @@ from config import settings
 
 # uvicorn 的默认 logger 不覆盖端点内 except 的异常细节；
 # 统一经 root logger 输出（dev 由 dev-start.ps1 重定向到 logs/backend-dev.log），
-# 端点失败原因不再只存在于 HTTP 响应里（2026-09-08 用户反馈"后端没有日志"）。
+# 端点失败原因不再只存在于 HTTP 响应里。
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -72,7 +72,7 @@ logger = logging.getLogger("pdf-reader")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await settings.init()
-    # 阶段6-T4：启动即打印实际生效的数据目录，兜底轨激活时显式告警
+    # 启动即打印实际生效的数据目录，兜底轨激活时显式告警
     logger.info("数据目录: %s（config.json / cache/ / docs_index.json 统一在此）", settings.data_dir)
     logger.info("配置文件: %s", settings.config_path)
     logger.info("缓存目录: %s", settings.cache_dir)
@@ -123,7 +123,7 @@ async def api_asset(path: str):
 
 @app.post("/api/figure/translate")
 async def api_figure_translate(payload: dict):
-    """按需生成"译制图"（2026-09-06 用户决策：仅表格支持，点按触发）。
+    """按需生成"译制图"。
 
     前端在全文翻译完成后，用户点击表格图片触发本接口：
     传入快照 PNG 的绝对路径，返回译制图 markdown（![Table](zh路径)）。
@@ -163,7 +163,7 @@ async def api_figure_translate(payload: dict):
 
 @app.post("/api/block/formula")
 async def api_block_formula(payload: dict):
-    """块级公式识别（按需「式」按钮，2026-09-08 用户决策）。
+    """块级公式识别。
 
     传入 {file_path, page, bbox}：裁剪该块区域渲染 2.5x PNG → 视觉模型
     （默认 PaddleOCR-VL-1.5，文档解析专精，公式→LaTeX 原生能力）→ 返回
@@ -196,7 +196,7 @@ async def api_block_formula(payload: dict):
 
 @app.post("/api/block/translate")
 async def api_block_translate(payload: dict):
-    """单块手动翻译/重翻（2026-09-07 用户需求：逐段点按触发）。
+    """单块手动翻译/重翻。
 
     用于两类场景：某段漏翻（"待翻译…"残留）或译文效果不佳，用户手动
     点按该段的「译/重译」按钮重新翻译。与全文管线走同一链路
@@ -210,7 +210,7 @@ async def api_block_translate(payload: dict):
     from translate.providers.openai_compat import PROMPT_VERSION
 
     original = str(payload.get("original") or "")
-    # 与全文管线一致：数学字母区规范化后再保护/翻译/算缓存键（2026-09-08）
+    # 与全文管线一致：数学字母区规范化后再保护/翻译/算缓存键
     original = sanitize.normalize_math_letters(original).strip()
     if not original.strip():
         raise HTTPException(status_code=400, detail="原文为空")
@@ -308,13 +308,13 @@ async def api_test_config(spec: dict):
 
 @app.post("/api/pipeline/run")
 async def api_run_pipeline(file_path: dict):
-    # 阶段11-T2 子集：全局翻译并发上限（前端本就收口 1，此守卫防绕过/多客户端）
+    # 子集：全局翻译并发上限（前端本就收口 1，此守卫防绕过/多客户端）
     if running_job_count() >= MAX_RUNNING_JOBS:
         raise HTTPException(
             status_code=429,
             detail=f"已有 {MAX_RUNNING_JOBS} 个翻译任务进行中，请等待完成后再试",
         )
-    # 上传即入库（T10 反馈 8）：源 PDF 复制进 <data_dir>/files/，此后
+    # 上传即入库：源 PDF 复制进 <data_dir>/files/，此后
     # 管线/阅读/导出全用库内副本——原文件移动/改名/删除零影响；原始
     # 文件名作为展示名传入（标题/文献库显示用）
     fp = str(file_path.get("file_path") or "")
@@ -337,7 +337,7 @@ async def api_run_pipeline(file_path: dict):
 
 @app.get("/api/pipeline/running")
 async def api_pipeline_running():
-    """列出运行中的翻译任务（阶段11-T5：前端 F5 丢 job_id 后据此自动重接管）。"""
+    """列出运行中的翻译任务。"""
     return list_running_jobs()
 
 
@@ -394,7 +394,7 @@ async def api_set_config(payload: dict):
 
 @app.get("/api/docs")
 async def api_list_docs():
-    """主页"已翻译文章"列表（阶段6-T3）。file_exists 供前端标记源文件缺失。"""
+    """主页"已翻译文章"列表。file_exists 供前端标记源文件缺失。"""
     import docs_index
 
     docs = docs_index.load_index(settings.data_dir)
@@ -405,7 +405,7 @@ async def api_list_docs():
 
 @app.post("/api/folders")
 async def api_create_folder(payload: dict):
-    """新建文件夹（侧边栏分组，2026-09-09 靠岸学术风格改版）。"""
+    """新建文件夹。"""
     import docs_index
 
     try:
@@ -461,7 +461,7 @@ async def api_move_doc(payload: dict):
 
 @app.post("/api/docs/rename")
 async def api_rename_doc(payload: dict):
-    """改文献显示名（2026-09-13 用户反馈）：仅改索引标题，不动源文件。"""
+    """改文献显示名：仅改索引标题，不动源文件。"""
     import docs_index
 
     doc_id = str(payload.get("doc_id") or "").strip()
@@ -475,7 +475,7 @@ async def api_rename_doc(payload: dict):
 
 @app.post("/api/docs/open")
 async def api_open_doc(payload: dict):
-    """按 doc_id 从缓存重建已翻译会话（阶段6-T3）：零 API 调用、秒开。
+    """按 doc_id 从缓存重建已翻译会话：零 API 调用、秒开。
 
     源文件存在时附带坐标标注（原版模式可用）；缺失时对照/紧跟模式
     纯缓存 markdown 仍完整可用，原版模式由前端禁用并提示。
@@ -531,7 +531,7 @@ async def api_upload(file: UploadFile = File(...)):
     """dev 桥接模式：浏览器无法拿到真实文件路径，故先上传到服务端，
     返回绝对路径供流水线按路径读取。仅用于本地开发/测试。
 
-    T10 反馈 8 起直接落文献库（<data_dir>/files/<内容sha1>.pdf，去重），
+     起直接落文献库（<data_dir>/files/<内容sha1>.pdf，去重），
     不再进临时目录——后续管线/重开全用库内副本。"""
     import hashlib
 
@@ -565,11 +565,11 @@ async def api_file_exists(path: str):
     return {"exists": os.path.isfile(path)}
 
 
-# ---------------- 阶段9：BabelDOC 双语 PDF 导出 ----------------
+# ---------------- BabelDOC 双语 PDF 导出 ----------------
 
 @app.post("/api/export/babeldoc")
 async def api_export_babeldoc(payload: dict):
-    """启动 BabelDOC 双语 PDF 导出（阶段9-T1）。
+    """启动 BabelDOC 双语 PDF 导出。
 
     入参 {file_path}；复用设置里的翻译 API 配置（api_url/key/model）。
     缓存命中（<cache>/babeldoc/<pdf_hash>/<model>/ 下已有 dual PDF）瞬时返回
@@ -589,7 +589,7 @@ async def api_export_babeldoc(payload: dict):
 
 @app.get("/api/export/babeldoc/cached")
 async def api_export_babeldoc_cached(file_path: str):
-    """探测文档是否已有排版对照产物（阶段9 验收反馈：命中则免确认直接打开）。"""
+    """探测文档是否已有排版对照产物。"""
     from export import babeldoc_export
 
     return await babeldoc_export.check_cached(
@@ -599,7 +599,7 @@ async def api_export_babeldoc_cached(file_path: str):
 
 @app.get("/api/export/babeldoc/running")
 async def api_export_babeldoc_running():
-    """列出运行中的排版对照导出任务（阶段11-T5 扩展：App 启动后静默重接管）。"""
+    """列出运行中的排版对照导出任务。"""
     from export import babeldoc_export
 
     return babeldoc_export.list_running_exports()

@@ -3,11 +3,11 @@ import { usePdfStore } from "./pdfStore";
 import type { PageResult, PipelineResult } from "../types";
 
 /**
- * 会话注册表（阶段8-T1 多会话阅读）：每篇打开的文献 / 每个翻译任务一个会话。
+ * 会话注册表：每篇打开的文献 / 每个翻译任务一个会话。
  *
  * 架构：pdfStore 仍是"唯一活跃会话"的载体（BilingualPage/InlinePage/
  * OriginalReader/块级操作零改动）；非活跃会话以快照形式停靠在此，
- * 切换会话 = captureActive（停靠当前）+ 把目标快照换入 pdfStore。
+ * 切换会话 = captureActive（停靠当前） + 把目标快照换入 pdfStore。
  * 翻译任务由 translationManager 后台轮询，写入本表；仅当其会话处于
  * 活跃状态时才镜像到 pdfStore。
  */
@@ -51,7 +51,7 @@ interface SessionsState {
   /** 切换活跃会话：停靠当前 → 目标快照换入 pdfStore → 更新 sessionKey */
   activate: (key: string) => boolean;
   /** 关闭会话；若关闭的是活跃会话，自动激活最近使用的其他会话，
-   *  返回新的活跃 key（全部关闭返回 null，由调用方决定跳转） */
+   * 返回新的活跃 key（全部关闭返回 null，由调用方决定跳转） */
   close: (key: string) => string | null;
   remove: (key: string) => void;
   /** 更新会话快照（翻译轮询/块级操作间接经 pdfStore，本方法供管理器用） */

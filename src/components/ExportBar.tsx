@@ -7,11 +7,11 @@ import { exportBilingual, probeDualPdf, saveDualPdf } from "../utils/export";
 import ConfirmDialog from "./common/ConfirmDialog";
 
 /**
- * 导出（2026-09-15 用户决策收敛为两种文件 + 按钮样式反馈）：
+ * 导出：
  * 主色「导出」按钮点开二次选格式——
  * - Markdown 译文：重排版双语内容（原文/译文成对，可二次编辑）；
  * - PDF·原版对照：BabelDOC 双语 PDF——已有成品直接另存；未生成则引导去
- *   「原版双语对照」模式生成（独立翻译整篇需数分钟），完成后回来导出。
+ * 「原版双语对照」模式生成（独立翻译整篇需数分钟），完成后回来导出。
  */
 export default function ExportBar() {
   const { pages, file, filePath, setError } = usePdfStore();
@@ -109,6 +109,7 @@ export default function ExportBar() {
       {open && (
         <>
           {/* 点击菜单外区域关闭 */}
+
           <div
             className="fixed inset-0 z-20"
             onClick={() => {

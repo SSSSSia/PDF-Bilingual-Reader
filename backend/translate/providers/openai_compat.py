@@ -8,20 +8,20 @@ from .base import BaseTranslator
 # OpenAI 兼容协议实现：SiliconFlow 与 OpenAI 都提供标准的 /chat/completions，
 # 仅 base_url / model 不同，因此共用同一套实现（决策 D3）。
 
-# 提示词/翻译参数版本号（阶段2-T2）：提示词内容、temperature、占位符协议等
+# 提示词/翻译参数版本号：提示词内容、temperature、占位符协议等
 # 影响译文产出的变更必须 +1，使旧翻译缓存整体失效（与 OCR 侧 TEXT_LAYER_MODEL 做法对齐）。
 # v1（隐含）：初始提示词。
-# v2：阶段2——系统提示词注入论文标题+术语表（两遍法）、新增 [[M<n>]] 公式占位符协议。
+# v2：——系统提示词注入论文标题+术语表（两遍法）、新增 [[M<n>]] 公式占位符协议。
 # v3：提示词明确参考文献/作者信息/表题也必须翻译、禁止原样返回（DualR 实测
 #     29 个"回声块"被用户当成未翻译）。
-# v4：禁止把提示词背景信息（论文标题/术语表）复述进译文——DALK 实测译文
-#     开头多出「论文标题：DALK: ...」原题行（模型回声系统提示词首行）。
-# v5：新增 <<<n>>> 批次分隔标记协议（2026-09-08）——批次合并翻译依赖模型
+# v4：禁止把提示词背景信息（论文标题/术语表）复述进译文——译文
+#     开头多出「论文标题：: ...」原题行（模型回声系统提示词首行）。
+# v5：新增 <<<n>>> 批次分隔标记协议——批次合并翻译依赖模型
 #     回显 <<<0>>>/<<<1>>> 标记切分段落，但提示词从未写明该协议：早期模型
 #     碰巧自觉回显，Qwen3-8B 遇语义连续的论文段落会把整批当一篇文档连译、
-#     一个标记都不回显（DALK 实测复现），导致全部批次"段数不匹配"减半
+#     一个标记都不回显（复现），导致全部批次"段数不匹配"减半
 #     到单段——速度退化回逐段且日志爆炸。
-# v6（2026-09-14 阶段12-T6）：分隔标记批量退役，改 JSON 数组结构化 I/O
+# v6：分隔标记批量退役，改 JSON 数组结构化 I/O
 #     （生产级做法，BabelDOC/沉浸式翻译同款）：输入 [{"id":n,"text":...}]
 #     要求输出同长度数组，id 对齐使缺段可定位——缺段/段融合仅出错段逐段
 #     重发（替代减半）；temperature 0.2→0（确定性+缓存友好）；系统提示词
@@ -39,7 +39,7 @@ _LANG_NAMES = {
     "de": "德文",
 }
 
-# 术语表条数上限（token 预算控制，见阶段2文档 §5）
+# 术语表条数上限
 _GLOSSARY_MAX = 30
 
 
@@ -55,8 +55,8 @@ def _system_prompt(source_lang: str, target_lang: str, config: dict | None = Non
     title = (config or {}).get("doc_title")
     if title:
         parts.append(f"论文标题：{title}")
-    # 当前小节（阶段12-T6）：术语消歧的最强近端语境（"当前小节：3.2
-    # Scaled Dot-Product Attention" 直接决定 attention 一词的译法域）
+    # 当前小节：术语消歧的最强近端语境（"当前小节：3.2
+    # Scaled Dot-Product " 直接决定 attention 一词的译法域）
     section = (config or {}).get("section")
     if section:
         parts.append(f"当前小节：{section}")
@@ -85,7 +85,7 @@ def _system_prompt(source_lang: str, target_lang: str, config: dict | None = Non
     glossary = (config or {}).get("glossary")
     if isinstance(glossary, dict) and glossary:
         # 命中过滤由 _translate_chunk 完成（本批文本中出现的条目才注入，
-        # 阶段12-T6：全表 30 条注入稀释注意力且诱发复述）
+        # 全表 30 条注入稀释注意力且诱发复述）
         lines = [
             f"- {k} → {v}"
             for k, v in list(glossary.items())[:_GLOSSARY_MAX]
@@ -96,7 +96,7 @@ def _system_prompt(source_lang: str, target_lang: str, config: dict | None = Non
 
 # ── 批量合并翻译（修复"翻译速度极慢"）────────────────────────────────
 # 逐块单发时，一篇论文上百个段落 = 上百次 HTTP 请求，串行排队极慢。
-# 将多个段落合并为一次请求（JSON 数组结构化 I/O，阶段12-T6），请求数
+# 将多个段落合并为一次请求，请求数
 # 减少约 6 倍。id 对齐使缺段可精确定位：缺段/段融合仅出错段逐段重发
 # （BabelDOC 同款回退）；HTTP/截断等传输层失败仍减半重试（小批次输出
 # 更短，可解 finish_reason=length）。
@@ -143,8 +143,8 @@ def _parse_json_array(out: str) -> dict[int, str]:
     return parsed
 
 
-# ── 连接复用（阶段1-T3）──────────────────────────────────────────────
-# 旧实现每次 translate() 都新建 httpx.AsyncClient——一篇论文 40+ 批次请求
+# ── 连接复用──────────────────────────────────────────────
+# 旧实现每次 translate 都新建 httpx.AsyncClient——一篇论文 40+ 批次请求
 # 就是 40+ 次 TCP+TLS 握手（每次约 200–400ms 纯浪费）。改为模块级懒加载
 # 单例。uvicorn 单事件循环下安全；客户端关闭（如测试隔离）后自动重建。
 _client: httpx.AsyncClient | None = None
@@ -169,7 +169,7 @@ class OpenAICompatProvider(BaseTranslator):
         model = config.get("model", "deepseek-ai/DeepSeek-V4-Flash")
 
         if not api_key:
-            # 无 Key 显式报错（2026-09-09）：旧版静默 return ""，单块重翻
+            # 无 Key 显式报错：旧版静默 return ""，单块重翻
             # 失败只表现为按钮变"重试"，用户无从得知是 Key 问题。全文管线
             # 由 run_pipeline 入口 fail-fast 拦截，此处兜底单块直调路径
             # （/api/block/translate 会转成 502 "翻译失败: …" 返回前端）。
@@ -187,7 +187,7 @@ class OpenAICompatProvider(BaseTranslator):
                 {"role": "user", "content": text},
             ],
             "max_tokens": 8192,
-            # 阶段12-T6：0.2→0。翻译是输出高度受限的任务，确定性采样
+            # 0.2→0。翻译是输出高度受限的任务，确定性采样
             # 是生产标配（BabelDOC 同款）：同文同译、缓存命中稳定、
             # 弱模型上减少随机发挥；温度带来的"多样性"对翻译是噪声。
             "temperature": 0,
@@ -198,7 +198,7 @@ class OpenAICompatProvider(BaseTranslator):
             payload["enable_thinking"] = False
         headers = {"Authorization": f"Bearer {api_key}"}
 
-        # 阶段1-T3：复用模块级连接，避免每次请求重建 TCP+TLS
+        # 复用模块级连接，避免每次请求重建 TCP+TLS
         resp = await _get_client().post(
             f"{api_url}/chat/completions",
             json=payload,
@@ -211,7 +211,7 @@ class OpenAICompatProvider(BaseTranslator):
             )
         data = resp.json()
 
-        # 阶段2-T1：finish_reason=length 说明输出被 max_tokens 截断。
+        # finish_reason=length 说明输出被 max_tokens 截断。
         # 合并批次截断 → 段数不匹配 → 旧版静默降级；单段截断 → 译文缺尾。
         # 都必须显式失败，让上层走减半重试，绝不静默吞掉。
         reason = (data.get("choices") or [{}])[0].get("finish_reason")
@@ -234,7 +234,7 @@ class OpenAICompatProvider(BaseTranslator):
     async def _translate_chunk(
         self, chunk: list, source_lang: str, target_lang: str, config: dict
     ) -> list[str]:
-        """翻译一个 chunk（JSON 数组协议，阶段12-T6）。
+        """翻译一个 chunk。
 
         - 术语表按本批命中过滤（全表注入稀释注意力且诱发复述）；
         - 缺段/段融合 → 仅出错段逐段重发（BabelDOC 同款，id 对齐使

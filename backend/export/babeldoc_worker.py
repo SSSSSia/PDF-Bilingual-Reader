@@ -1,4 +1,4 @@
-"""BabelDOC 导出 worker（阶段9-T1；T4 失败边界 2026-09-11）。
+"""BabelDOC 导出 worker。
 
 在 .venv-babeldoc 的 Python 里运行（BabelDOC 依赖隔离，不污染主后端环境），
 直接调用 BabelDOC Python API（async_translate）而非 CLI 子进程——
@@ -12,7 +12,7 @@ stdout 协议（每行一个 JSON，供主后端逐行读取）：
   {"type": "error", "error": "..."}                    失败
 诊断/日志一律走 stderr，保证 stdout 纯净。
 
-T4 失败边界：
+失败边界：
   ① 布局模型权重下载失败 → error 行带可执行引导（缓存路径/上游/离线资产命令）；
   ② 免费档 429 限流 → 应用层 qps 减半重跑整次尝试，最多 3 次
      （BabelDOC 内部 tenacity 100 次指数退避仍是第一道防线）；
@@ -55,7 +55,7 @@ def _is_rate_limit_error(msg: str) -> bool:
 
 def _rss_mb() -> float:
     """当前进程 WorkingSet（MB）。仅 Windows（psapi）；失败/非 Windows 返回 0
-    （主后端据此跳过告警）。阶段11-T3 子集：RSS 阈值告警的数据来源。"""
+    （主后端据此跳过告警）。子集：RSS 阈值告警的数据来源。"""
     try:
         import ctypes
         from ctypes import wintypes
@@ -120,7 +120,7 @@ async def main() -> None:
         api_key=args.api_key,
     )
 
-    # 阶段9-T4①：首跑布局模型权重下载失败（断网/上游不可达/校验失败）时
+    # ①：首跑布局模型权重下载失败（断网/上游不可达/校验失败）时
     # 给出可执行的引导文案，而不是把底层异常原样抛给前端用户
     try:
         doc_layout_model = DocLayoutModel.load_onnx()
@@ -144,7 +144,7 @@ async def main() -> None:
 
     split_strategy = None
     if args.max_pages_per_part:
-        # 阶段9-T4③：大文档分批——超页数自动切片；进度由 BabelDOC 父监视器
+        # ③：大文档分批——超页数自动切片；进度由 BabelDOC 父监视器
         # 按批加权聚合（overall 不归零），产物由 ResultMerger 合并为单个 dual.pdf
         split_strategy = TranslationConfig.create_max_pages_per_part_split_strategy(
             args.max_pages_per_part
@@ -153,7 +153,7 @@ async def main() -> None:
     _emit({"type": "ready"})
 
     async def run_attempt(qps: float) -> tuple[dict | None, str | None]:
-        """单次完整翻译尝试（阶段9-T4②：限流失败时由外层降 qps 重跑）。"""
+        """单次完整翻译尝试。"""
         config = TranslationConfig(
             translator=translator,
             input_file=args.input,
@@ -163,9 +163,9 @@ async def main() -> None:
             output_dir=args.output_dir,
             qps=qps,
             use_rich_pbar=False,           # tqdm/rich 都不需要，进度走事件流
-            auto_extract_glossary=False,   # T0 决策：省 token，术语表后续增强
+            auto_extract_glossary=False,   # 决策：省 token，术语表后续增强
             watermark_output_mode=WatermarkOutputMode.NoWatermark,
-            # 与 T0 实测一致：Qwen3-8B 关闭思考链，避免 <think> 污染译文
+            # 与 实测一致：Qwen3-8B 关闭思考链，避免 <think> 污染译文
             custom_system_prompt=(
                 "/no_think You are a professional academic paper translator. "
                 "Translate the input English text into Simplified Chinese. "
@@ -176,9 +176,9 @@ async def main() -> None:
         )
 
         # ---- 事件消费 + 产物看门狗双轨 ----
-        # 实测（2026-09-10）：BabelDOC 0.6.4 以 Python API 调用时，产物落盘后
+        # 实测：BabelDOC 0.6.4 以 Python API 调用时，产物落盘后
         # "finish" 事件可能永不到来（finished_callback 未触发，async-for 挂死在
-        # 99% Save PDF）——CLI 路径（T0）无此问题。故不能只等事件：并行跑一个
+        # 99% Save PDF）——CLI 路径无此问题。故不能只等事件：并行跑一个
         # 看门狗，轮询输出目录，*.dual.pdf 出现且大小稳定即判定成功，主动收尾。
         # 收尾用 os._exit：绕开 BabelDOC 残留的非守护线程导致解释器无法退出。
         result: dict | None = None
@@ -193,7 +193,7 @@ async def main() -> None:
                         "type": "progress",
                         "stage": str(event.get("stage", "")),
                         "overall": float(event.get("overall_progress", 0) or 0),
-                        # 阶段11-T3 子集：RSS 随进度上报，主后端超阈值告警
+                        # 子集：RSS 随进度上报，主后端超阈值告警
                         "rss_mb": round(_rss_mb(), 1),
                     })
                 elif etype == "finish":
@@ -274,7 +274,7 @@ async def main() -> None:
 
         return result, error_msg
 
-    # 阶段9-T4②：限流退避——整次尝试仍因 429/限流失败时，qps 减半重跑，
+    # ②：限流退避——整次尝试仍因 429/限流失败时，qps 减半重跑，
     # 最多 3 次（重跑前清理半成品产物，防看门狗误命中旧文件）
     qps: float = args.qps
     retries = 0

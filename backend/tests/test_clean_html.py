@@ -1,4 +1,4 @@
-"""textlayer._clean_html 单元测试（阶段1，开发流程 §4.1）。
+"""textlayer._clean_html 单元测试。
 
 纯函数测试：验证 HTML 杂质清理规则（<br>/<sup>/<sub>/注释/实体），
 不发起任何网络请求。运行：.venv/Scripts/python.exe -m pytest backend/tests/ -q
@@ -42,7 +42,7 @@ def test_clean_text_untouched():
     assert _clean_html(text) == text
 
 
-# ── 伪标题降级（2026-09-08 用户反馈"这两句不是标题"）────────────────────
+# ── 伪标题降级────────────────────
 
 from ocr.textlayer import _demote_sentence_headings
 
@@ -86,13 +86,13 @@ def test_chinese_question_heading_demoted():
     assert out.startswith("**") and not out.startswith("#")
 
 
-# ── 斜体误判上标还原 + 跨栏粘连段拆分（2026-09-08）──────────────────────
+# ── 斜体误判上标还原 + 跨栏粘连段拆分──────────────────────
 
 from ocr.textlayer import _fix_italic_superscripts, _split_glued_columns
 
 
 def test_italic_superscript_words_restored():
-    """DALK EMNLP 版实测形态：斜体单词被误判成 Unicode 上标。"""
+    """EMNLP 版实测形态：斜体单词被误判成 Unicode 上标。"""
     assert "initial node" in _fix_italic_superscripts("the \u2071\u207f\u2071t\u2071al \u207fode")
     assert "post-processing" in _fix_italic_superscripts("post\u207bprocess\u2071\u207fg")
     assert "prune" in _fix_italic_superscripts("pru\u207fe")
@@ -106,7 +106,7 @@ def test_true_superscripts_kept():
 
 
 def test_inline_abstract_heading_split():
-    """DALK EMNLP 首页实测：单位行+行中 Abstract 标题+右栏片段粘连。"""
+    """EMNLP 首页实测：单位行+行中 Abstract 标题+右栏片段粘连。"""
     md = (
         "5School of Information, The University of Texas at Austin, Austin "
         "**Abstract** As large language models (LLMs) (Brown et al., 2020)\n\n"
@@ -119,7 +119,7 @@ def test_inline_abstract_heading_split():
 
 
 def test_fragment_paragraph_dropped():
-    """DALK p4 实测：列表标记开头的残缺碎片（其它段的更长前缀）被丢弃。"""
+    """：列表标记开头的残缺碎片（其它段的更长前缀）被丢弃。"""
     full = (
         "After obtaining the two sub-graphs we perform post-processing to "
         "further prune redundant information in sub-graphs and describe them"
@@ -136,17 +136,17 @@ def test_normal_short_paragraph_kept():
     assert _split_glued_columns(md) == md
 
 
-# ── 标题缺失根治回归（2026-09-12 反馈③：DALK/FG-RAG 首页标题丢失）──────
+# ── 标题缺失根治回归──────
 
-DALK_TITLE = (
-    "# **DALK: Dynamic Co-Augmentation of LLMs and KG to answer "
+DEMO_TITLE = (
+    "# **DEMO: A Co-Augmentation Framework of LLMs and KG to answer "
     "Alzheimer’s Disease Questions with Scientific Literature**"
 )
 
 
 def test_long_academic_title_kept():
-    """DALK 实测：17 词学术真标题不再被 ≥14 词规则误降级（无句子证据）。"""
-    assert _demote_sentence_headings(DALK_TITLE) == DALK_TITLE
+    """：17 词学术真标题不再被 ≥14 词规则误降级（无句子证据）。"""
+    assert _demote_sentence_headings(DEMO_TITLE) == DEMO_TITLE
 
 
 def test_first_heading_of_first_page_protected():
@@ -171,7 +171,7 @@ def test_protect_first_only_shields_first_heading():
 
 
 def test_title_paragraph_survives_acm_ref_tail_match():
-    """FG-RAG 实测：ACM 引用段合法含有标题全文，标题段（# 开头）不得被
+    """：ACM 引用段合法含有标题全文，标题段（# 开头）不得被
     段尾跨栏截除规则误杀。"""
     md = (
         "# **Context-Aware Fine-Grained Graph RAG for Query-Focused "

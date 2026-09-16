@@ -112,7 +112,7 @@ async fn ensure_backend_ready(state: &AppState) -> Result<(), String> {
     Err("FastAPI 后端未就绪（已等待 15 秒）".to_string())
 }
 
-/// 前端启动就绪门（2026-09-13）：sidecar onefile 首启解压+Defender 扫描可
+/// 前端启动就绪门：sidecar onefile 首启解压+Defender 扫描可
 /// 能数十秒，前端等它再渲染会发请求的页面。Rust reqwest 探测（不走系统
 /// 代理的 webview 网络栈），timeout_ms 由前端给定（默认 120s）。
 #[tauri::command(rename_all = "snake_case")]
@@ -217,7 +217,7 @@ pub async fn export_content(
 }
 
 /// 把缓存里的成品文件（BabelDOC 双语 PDF 等二进制产物）复制到用户所选
-/// 路径（2026-09-15 T10 导出收敛：Markdown 译文 + 原版对照 PDF 两种）。
+/// 路径。
 /// export_content 只收字符串写不了二进制；fs 插件未引入，经 Rust 落盘。
 #[tauri::command]
 pub async fn export_copy_file(

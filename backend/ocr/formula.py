@@ -1,4 +1,4 @@
-"""块级公式识别（按需「式」按钮，2026-09-08）：裁剪块区域 → 视觉模型 → LaTeX。
+"""块级公式识别：裁剪块区域 → 视觉模型 → LaTeX。
 
 复用 siliconflow._ocr_image 通道（PaddleOCR-VL 已实测调优：max_tokens 8192、
 temperature 0.01），裁剪坐标来自 pipeline.layout 的多段 bbox。识别结果按
@@ -18,7 +18,7 @@ import pymupdf
 
 from cache.file_cache import read_cache, write_cache
 
-# v2: 强化提示词（下标质量更好，实测 \mu_k vs \mu k）+ 裸 LaTeX 包裹后处理
+# v2: 强化提示词（下标质量更好，实测 \mu_k vs \mu k） + 裸 LaTeX 包裹后处理
 # （PaddleOCR-VL 实测从不输出 $ 定界符，结果需包裹后 KaTeX 才能渲染）
 FORMULA_VERSION = "v2"
 
@@ -46,7 +46,7 @@ _BARE_LATEX = re.compile(
 def wrap_bare_latex(text: str) -> str:
     """识别结果无任何 $ 定界时，把裸 LaTeX 宏片段包进 $...$。
 
-    实测（2026-09-08）：PaddleOCR-VL 即便按提示词要求也**从不输出 $ 定界**，
+    实测：PaddleOCR-VL 即便按提示词要求也**从不输出 $ 定界**，
     返回形如 "N(x; \\mu_k, \\Sigma_k)"——不包裹则 KaTeX 无法渲染，宏原样
     露在正文里。只处理无 $ 的结果（有定界说明模型这次听话了，不动）；
     普通单词不含 \\ 不会误包，残渣片段（\\x）包了也只影响残渣本身。

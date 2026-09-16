@@ -1,4 +1,4 @@
-"""图表区域快照回归测试（用户反馈"图片原模原样显示"，2026-09-06）。
+"""图表区域快照回归测试。
 
 依赖仓库内测试样张 test_ocr/GraphRAG-Bench.pdf（LaTeX 导出、矢量图表 +
 页码页眉），验证：
@@ -53,7 +53,7 @@ def test_figure_inserted_above_caption():
 
 
 def test_table_page_snapshotted_as_figure():
-    """表格也按快照处理（2026-09-06 用户决策：文本表格转 markdown 必错位）：
+    """表格也按快照处理：
     page7（1-based）的两个表格应各产生一个快照（该样张表格无表注，
     快照按页尾追加兜底）。断言须在临时目录存活期内完成。"""
     with tempfile.TemporaryDirectory() as d:
@@ -73,12 +73,12 @@ def test_page_number_noise_filtered():
     assert not any(b.strip() in {"2", "Page 3 of 12"} for b in blocks)
 
 
-# ── v2 几何配对 + 重排守卫修复（2026-09-07，DALK p7 实测）──────────────
+# ── v2 几何配对 + 重排守卫修复──────────────
 
 
 def test_insert_figures_geo_pairs_by_proximity():
     """快照检测序与 caption markdown 序不一致时按坐标就近配对。
-    DALK p7 实测：快照序 tab→fig→tab，caption 序 Table3→Table4→Figure3，
+    ：快照序 tab→fig→tab，caption 序 Table3→Table4→Figure3，
     旧序号配对把 Figure 3 的图配到了 Table 4 caption 旁。"""
     import pymupdf
 

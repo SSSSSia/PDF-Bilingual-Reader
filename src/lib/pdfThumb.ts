@@ -6,7 +6,7 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /**
- * 渲染 PDF 第一页为 dataURL（文档库卡片缩略图用，2026-09-09 靠岸学术风格改版）。
+ * 渲染 PDF 第一页为 dataURL。
  * 失败返回 null（调用方显示占位样式）；用完即销毁文档句柄，不驻留内存。
  */
 export async function renderFirstPage(

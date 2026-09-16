@@ -1,6 +1,6 @@
-"""PaddleOCR-VL 整页结构化解析：数字页提取主路线（阶段12-T1）。
+"""PaddleOCR-VL 整页结构化解析：数字页提取主路线。
 
-决策依据（docs/VLM结构化解析对比.md，2026-09-14 A/B 实测，4 篇论文 12 页）：
+决策依据：
 现行 textlayer（pymupdf4llm classic + 启发式，v18）公式 0 段 LaTeX、复杂
 版式页 bag 0.96~0.98 触及天花板；PaddleOCR-VL「OCR:」整页解析公式 40 段
 定界 LaTeX（`\\(...\\)` 与前端 preprocessMath→KaTeX 链路天然兼容）、复杂
@@ -11,15 +11,15 @@
   finish_reason 以驱动截断重发——密集页可能超出 max_tokens 8192
   （总上下文 16384），命中时按栏对半裁剪重发拼接（双栏页左右半、
   单栏页上下半；A/B 实测 0/12 页触发，作为保险存在）；
-- mask_regions：送 VLM 前对图表区域打白底遮罩（阶段12-T2 接入
+- mask_regions：送 VLM 前对图表区域打白底遮罩（接入
   textlayer._snapshot_figures 的最终区域——表格维持 v5 快照决策，
   区域内文字已由快照"原模原样"承载，VLM 不再重复识别/丢弃）；
-  T9.2 起遮罩扩展到版面模型 abandon 区域（版权/页眉/venue 佐料
+  遮罩扩展到版面模型 abandon 区域（版权/页眉/venue 佐料
   不进解析视野），truth 同步扣除，输出段落再按区域文本兜底剔除。
 
-防幻觉兜底（交叉校验降级，T3；查全率/精确率双阈值，T10 反馈 5）与
-快照插回（T2）在 parse_page_verified。
-缓存：原始解析结果存 ocr_key(pdf_hash, page, VLM_PARSE_MODEL)——T5 调参
+防幻觉兜底（交叉校验降级；查全率/精确率双阈值）与
+快照插回在 parse_page_verified。
+缓存：原始解析结果存 ocr_key(pdf_hash, page, VLM_PARSE_MODEL)——调参
 与回归重放时直接命中，免重打 API。
 """
 import asyncio
@@ -51,13 +51,13 @@ from cache.file_cache import ocr_key, read_cache, write_cache
 # 双栏判定的通栏块阈值：与 textlayer._column_reading_order 同口径
 _COL_WIDE = 0.55
 
-# ── 版面模型区域消费（阶段12-T9.2）────────────────────────────────
+# ── 版面模型区域消费────────────────────────────────
 # DocLayout-YOLO 区域按 label 分类四用：
 #   table/figure → _figure_regions 额外候选（无框表快照补位）；
 #   abandon     → 送 VLM 前遮罩 + truth 扣除 + 输出段落剔除（三用同区域）；
 #   title       → 输出段落标题提升（页 0 最大 title→#，编号深度定级）；
 #   plain text  → _column_reading_order 栏判定的区域级信号（整栏一个粗
-#                 粒度文本块的页，块级左右计数判不出双栏，T10 反馈修复）。
+#                 粒度文本块的页，块级左右计数判不出双栏，反馈修复）。
 # 坐标全部为 PDF 点（layout_worker.py 已除回渲染倍率）。
 _FIG_LABELS = {"figure", "table"}
 _ABANDON_LABEL = "abandon"
@@ -103,7 +103,7 @@ def _split_layout_regions(regions: list | None) -> dict:
 
 
 def _title_level(raw_text: str, is_doc_title: bool) -> int:
-    """编号深度定级（通用约定）+ 页 0 最大 title → 文档标题级。"""
+    """编号深度定级（通用约定） + 页 0 最大 title → 文档标题级。"""
     if is_doc_title:
         return 1
     m = _TITLE_NUM.match(raw_text or "")
@@ -129,7 +129,7 @@ def _abandon_hit(para_norm: str, reg_norm: str) -> bool:
 
 
 def _drop_abandon_paragraphs(md: str, abandon_norms: list[str]) -> str:
-    """剔除命中 abandon 区域文本的输出段落（T9.2 第三用）。
+    """剔除命中 abandon 区域文本的输出段落（第三用）。
 
     遮罩与 truth 扣除之后仍可能有残留（遮罩边缘切半行、VLM 对遮罩边缘
     的幻觉补全、textlayer 降级路径的页眉页脚），这里按区域文本兜底剔除。
@@ -175,11 +175,11 @@ def _norm_split(body: str, tnorm: str) -> tuple[str, str] | None:
 
 
 def _promote_titles(md: str, layout_titles: list) -> str:
-    """版面 title 区域 → 输出段落标题提升（T9.2）+ run-in 拆分（T9.5）。
+    """版面 title 区域 → 输出段落标题提升+ run-in 拆分。
 
     layout_titles 元素为 (norm, raw, level)。匹配纪律：
     - 整段即标题（前缀互含 + 长度约束，apply_font_evidence 同款）→ 加 # 前缀；
-    - **run-in 拆分**：VLM 常把标题行与后续正文粘成一段（FG-RAG p1 实测
+    - **run-in 拆分**：VLM 常把标题行与后续正文粘成一段（
       "Abstract Retrieval-Augmented..."）——段落归一化前缀与标题区域文本
       逐字符对齐（tnorm ≥6 字符）时，拆成「标题段 + 余文段」，几何证据
       保驾护航（模型在页面上真的看到了这行标题），非文本猜测；
@@ -226,9 +226,9 @@ def _promote_titles(md: str, layout_titles: list) -> str:
 # 原始解析结果的缓存伪模型名（cache/file_cache.ocr_key 的 model 位）。
 # 独立于 textlayer / 视觉 OCR 缓存；仅当解析协议（提示/重试策略）变化
 # 时才 bump 版本后缀。
-# v2（阶段12-T9.2）：送 VLM 前遮罩扩展到 abandon 区域（版权/页眉不再
+# v2：送 VLM 前遮罩扩展到 abandon 区域（版权/页眉不再
 # 进入解析视野），旧缓存是未遮罩产物，需整体失效重解析。
-# v3（阶段12-T10 反馈 2）：快照区域受版面模型 plain text 区域仲裁——
+# v3：快照区域受版面模型 plain text 区域仲裁——
 # prompt 示例框不再遮罩/扣除，旧缓存缺这部分内容且 bag 失败后原始缓存
 # 不会被重取（只在通过校验时落盘），必须整体失效重解析。
 VLM_PARSE_MODEL = "vlm-parse-v3"
@@ -250,11 +250,11 @@ def bag_f1(a: str, b: str) -> float:
     return 2 * inter / max(len(a) + len(b), 1)
 
 
-# 交叉校验专用剥离：只留字母/数字/CJK（T8 校准，2026-09-14 实测）。
+# 交叉校验专用剥离：只留字母/数字/CJK。
 # 原因：真值数学是 Unicode 碎屑（NFKC 后仍含 ∑≤∈ 等符号），VLM 是
 # LaTeX 语法（\ { } ^ _），逐字符多重集在这两类表示间系统性稀释——
-# FG-RAG p3 数学页 0.8985（假性不达标）→ 字母数字口径 0.9008；而真实
-# 内容丢失（DALK p9 无框表被 VLM 丢弃）0.688→0.696 仍远低于阈值，
+# 数学页 0.8985（假性不达标）→ 字母数字口径 0.9008；而真实
+# 内容丢失（无框表被 VLM 丢弃）0.688→0.696 仍远低于阈值，
 # 防幻觉能力不受影响。中文文档靠 CJK 保留参与校验。
 _VERIFY_STRIP = re.compile(r"[^a-z0-9\u4e00-\u9fff]")
 
@@ -266,7 +266,7 @@ def verify_bag(vlm_md: str, truth: str) -> float:
     return bag_f1(a, b)
 
 
-# 校验判定（T10 反馈 5 校准，2026-09-15 SubgraphRAG 29 页实测）：F1 单阈值
+# 校验判定：F1 单阈值
 # 会误杀数学页——LaTeX 命令字母（\mathbb{P} → "mathbbP"）膨胀 VLM 侧字符
 # 数，真值侧的 ℙ 却被字母数字口径剥空，实测公式页 F1 0.895 被拒、其查全率
 # 0.9994（内容零丢失）纯口径稀释。改为双阈值：
@@ -314,7 +314,7 @@ def _render_png(
 
 
 def two_column(page) -> bool:
-    """几何双栏判定（截断对半重发的切向选择 + T5 顺序兜底的触发条件）。
+    """几何双栏判定（截断对半重发的切向选择 + 顺序兜底的触发条件）。
     与 textlayer._column_reading_order / A/B 脚本同口径：左右各 ≥3 个窄块
     （宽 ≤0.55 页宽、高超 200pt 的穿栏块不参与）且存在干净分栏沟。"""
     w = page.rect.width
@@ -425,7 +425,7 @@ async def parse_page(
     return {"md": text, "trunc": trunc, "elapsed": time.perf_counter() - t0}
 
 
-# ── 快照/遮罩/truth 协同（阶段12-T2）─────────────────────────────────
+# ── 快照/遮罩/truth 协同─────────────────────────────────
 
 
 def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=None) -> dict:
@@ -434,14 +434,14 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
     - 快照复用 textlayer._snapshot_figures（含 sidecar、v5 表格=快照
       决策）——VLM 路线的遮罩、truth 扣除与文本层降级路径必须同区域
       才自洽；
-    - 版面模型区域（T9.2）：table/figure 并入快照候选（无框表补位，
-      DALK p9 回归用例）；abandon 区域三用数据在此采集（区域矩形 +
+    - 版面模型区域：table/figure 并入快照候选（无框表补位，
+      回归用例）；abandon 区域三用数据在此采集（区域矩形 +
       区域文本 norm——遮罩渲染时由调用方拼接 regions+abandon）；
       title 区域文本提取 + 编号深度定级（页 0 最大 title → #）；
     - 快照必须先于遮罩渲染：_figure_regions 依赖 cluster_drawings，
       先画白底矩形会把遮罩本身当成绘图簇；
     - truth = 文本层字符流扣除快照区域与 abandon 区域内部文本（图注
-      豁免，与 redact 同判定）——交叉校验（T3）的比对基准，快照承载
+      豁免，与 redact 同判定）——交叉校验的比对基准，快照承载
       与佐料区域的内容都不要求 VLM 复述；
     - scanned 分类与 extract_pages 有效性判定同口径：短文本 + 无快照
       = 扫描页，维持既有视觉通道。
@@ -507,9 +507,9 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
             parts.append(b[4] if len(b) > 4 else "")
         truth = "".join(parts)
         raw_text_len = len(page.get_text("text").strip())
-        # T9.4 兜底证据：版面信号缺席（运行时缺失/worker 失败/工具直调）
+        # 兜底证据：版面信号缺席（运行时缺失/worker 失败/工具直调）
         # 才采集字号证据——layout_ok=True 时版面模型的「本页无标题」是
-        # 可信判定，字号规则不得越权覆盖（fb182b5 冻结版，不新增规则）
+        # 可信判定，字号规则不得越权覆盖
         font_evidence = None
         if layout_regions is None:
             try:
@@ -534,18 +534,18 @@ def _prepare(file_path: str, pno: int, image_dir: str | None, layout_regions=Non
 
 
 def _finalize_md(prep: dict, md: str) -> str:
-    """快照引用插回 + 双栏顺序几何兜底 + 版面区域消费（T9.2）。
+    """快照引用插回 + 双栏顺序几何兜底 + 版面区域消费。
 
     - 插回：几何配对用 PDF raw_blocks 的 caption 真实坐标（与 textlayer
       同款 _insert_figures），在 VLM 输出里按 caption 文本定位插入点——
       VLM 看得见快照区域外的 caption（遮罩只盖区域内），锚点天然存在；
-    - 顺序兜底：VLM 偶发整栏交换（A/B 实测 DALK p2 反例：内容完整 bag
+    - 顺序兜底：VLM 偶发整栏交换（A/B 实测 ：内容完整 bag
       0.99、双栏整栏互换）。_column_reading_order 自带高置信门槛（全部
       段落可定位坐标 + 左右各 ≥3 窄块 + 干净分栏沟），不满足即原样返回
       ——兜底只会纠正、不会搅乱；
     - abandon 段落剔除：遮罩/truth 扣除后的残留兜底（区域文本匹配）；
-    - title 提升编号定级；版面信号缺席（layout_ok=False，T9.4）时落回
-      字号证据（fb182b5 冻结版：粗体+字号判标题/首页小字印刷块剔除）。"""
+    - title 提升编号定级；版面信号缺席（layout_ok=False）时落回
+      字号证据。"""
     if prep["refs"]:
         md = _insert_figures(
             md, prep["refs"], snap_regions=prep["regions"], raw_blocks=prep["raw_blocks"]
@@ -562,7 +562,7 @@ def _finalize_md(prep: dict, md: str) -> str:
 
 
 def _textlayer_fallback(file_path: str, pno: int, image_dir: str | None, prep: dict) -> str:
-    """整页回退现行文本层提取（阶段12-T3）。快照复用 prep 的产物，
+    """整页回退现行文本层提取。快照复用 prep 的产物，
     不重复区域检测——降级路径与主路线同一份快照，行为自洽。"""
     doc = pymupdf.open(file_path)
     try:
@@ -584,9 +584,9 @@ async def parse_page_verified(
     sem: asyncio.Semaphore | None = None,
     layout=None,
 ) -> dict:
-    """数字页混合主路线（T1+T2+T3+T9.2）：快照 → 遮罩解析 → 插回 → 交叉校验降级。
+    """数字页混合主路线（+++）：快照 → 遮罩解析 → 插回 → 交叉校验降级。
 
-    layout：ocr.layout_model.LayoutProvider（T9.2 版面模型信号源）。
+    layout：ocr.layout_model.LayoutProvider（版面模型信号源）。
     None（回归工具/单页直调）或该页无产出（运行时缺失/失败/缓存空）时，
     等价于无版面信号的既有行为——快照不含无框表补位、无遮罩扩展、
     无标题提升，管线照常完成。
@@ -600,7 +600,7 @@ async def parse_page_verified(
     回退（防幻觉兜底，任务绝不因 VLM 失败而失败）。truth 过短（近空页/
     纯图页）无从校验，直接接受 VLM 输出——无内容可损失。
 
-    缓存两层：原始解析结果（未插快照引用）存 VLM_PARSE_MODEL 键，T5 调参
+    缓存两层：原始解析结果（未插快照引用）存 VLM_PARSE_MODEL 键，调参
     与回归重放免重打 API；最终页产物由调用方按 TEXT_LAYER_MODEL 键存
     （熔断随管线版本走）。
 
@@ -636,7 +636,7 @@ async def parse_page_verified(
     truth_n = norm(prep["truth"])
     # 退化输出一次性重试（hosted 模型偶发只回页码，实测 bag≈0.002）：
     # 输出字母数字 <10% 真值且真值足够长 → 重打一次——退化多为服务端瞬态，
-    # 非输入确定性问题（SubgraphRAG p7 实测整页只返回 "7"）
+    # 非输入确定性问题（整页只返回 "7"）
     if fresh and md_raw and truth_n:
         tn = _VERIFY_STRIP.sub("", truth_n.lower())
         vn = _VERIFY_STRIP.sub("", norm(md_raw).lower())
@@ -681,7 +681,7 @@ async def parse_page_verified(
             "trunc": trunc,
         }
     # 降级路径自身也失败（实测：pymupdf4llm 在链接注解损坏的页崩，
-    # FG-RAG p6-12）→ 保留未校验的 VLM 输出——好过整页空掉，日志留痕
+    # ）→ 保留未校验的 VLM 输出——好过整页空掉，日志留痕
     try:
         md = await asyncio.to_thread(
             _textlayer_fallback, file_path, pno, image_dir, prep

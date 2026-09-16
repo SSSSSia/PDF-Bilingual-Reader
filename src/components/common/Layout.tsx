@@ -5,10 +5,10 @@ import Sidebar from "../Sidebar";
 import TitleBar from "./TitleBar";
 
 /**
- * 布局（阶段10-T4 桌面沉浸化改造）：
- * 壳层 = 自绘 TitleBar（标题栏）+ 内容行（flex-1 min-h-0）。
+ * 布局：
+ * 壳层 = 自绘 TitleBar（标题栏） + 内容行（flex-1 min-h-0）。
  * - 阅读页（/reader/*）：无侧边栏，main 为纵向 flex 容器（工具栏+通顶内容），
- *   由页面组件自己管理滚动——阅读面积从 ~730px 提升到 ~960px（1080p）。
+ * 由页面组件自己管理滚动——阅读面积从 ~730px 提升到 ~960px（1080p）。
  * - 主页/设置/添加：保留侧边栏 + max-w 居中 + 页内滚动（原视觉不变）。
  * - <md 窄窗口降级顶栏仅在非阅读页保留（阅读页工具栏自带换行降级）。
  */
@@ -23,7 +23,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     const next = theme === "dark" ? "light" : "dark";
     toggleTheme();
     setTheme(next);
-    // 阶段6-T1：主题持久化走配置单一来源（落盘 config.json 的 ui.theme），
+    // 主题持久化走配置单一来源（落盘 config.json 的 ui.theme），
     // 下次启动由 App 启动灌入自动恢复。
     await saveTheme(next);
   };
@@ -32,7 +32,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex h-screen flex-col overflow-hidden">
       <TitleBar />
       <div className="flex min-h-0 flex-1">
-        {/* 侧边栏：仅主页/设置等非阅读视图（阅读页通顶铺满，阶段10） */}
+        {/* 侧边栏：仅主页/设置等非阅读视图 */}
+
         {!isReader && (
           <div className="hidden md:block">
             <Sidebar />
@@ -40,8 +41,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         )}
 
         {/* 内容区 */}
+
         <div className="flex min-w-0 flex-1 flex-col">
           {/* 窄窗口降级顶栏（<md，仅非阅读页；阅读页由工具栏自行换行降级） */}
+
           {!isReader && (
             <nav className="sticky top-0 z-30 border-b border-slate-200 bg-white md:hidden dark:border-slate-700 dark:bg-slate-900">
               <div className="flex h-12 items-center justify-between px-4">
@@ -78,7 +81,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   </Link>
                 </div>
               </div>
-              {/* 阶段6-T1：只在「已加载且确无 Key」时提示，避免启动加载瞬间误报 */}
+              {/* 只在「已加载且确无 Key」时提示，避免启动加载瞬间误报 */}
+
               {configLoaded && config && !isConfigured && (
                 <div className="flex items-center gap-1.5 border-t border-slate-200 px-4 py-1.5 text-xs font-medium text-amber-700 dark:border-slate-700 dark:text-amber-400">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />

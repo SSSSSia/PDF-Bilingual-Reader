@@ -3,8 +3,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { PageResult } from "../types";
 import { checkBabeldocCached, isTauri, openLocalPdf } from "../lib/bridge";
 
-/** 导出收敛为两种文件（2026-09-15 用户决策）：
- *  markdown = 重排版双语内容（Markdown 译文）；pdf = BabelDOC 原版对照 PDF */
+/** 导出收敛为两种文件：
+ * markdown = 重排版双语内容（Markdown 译文）；pdf = BabelDOC 原版对照 PDF */
 export type ExportFormat = "markdown" | "pdf";
 
 interface ExportMeta {

@@ -7,8 +7,8 @@ import LoadingSpinner from "./common/LoadingSpinner";
 
 /**
  * API 配置页 —— 交互逻辑参照 CadAgent 的 API 管理：
- * 1. 提供商「预设」下拉：选中只填充 API 地址（用户决策 2026-09-06：
- *    预设不改模型名称，模型始终用户自选；Custom 不覆盖）；
+ * 1. 提供商「预设」下拉：选中只填充 API 地址（既定决策 ：
+ * 预设不改模型名称，模型始终用户自选；Custom 不覆盖）；
  * 2. 地址 / Key / 模型始终可编辑，Key 带显隐切换；
  * 3. 「测试连接」经本地后端代理发最小请求，内联回显结果；
  * 4. 加载时按 地址 反推预设，匹配不上落「自定义」。
@@ -95,7 +95,7 @@ interface ApiSectionProps {
 
 /** 单个 API 区块：预设下拉 + 地址/Key/模型 + 测试连接 */
 function ApiSection({ title, value, presets, onChange, testMode, test, onTest, children }: ApiSectionProps) {
-  // 只按地址反推预设（用户决策 2026-09-06：预设只改地址，模型独立选择）
+  // 只按地址反推预设
   const matched = presets.findIndex((p) => p.url === value.api_url && p.url);
   const presetIndex = matched >= 0 ? matched : presets.length - 1;
 
@@ -104,7 +104,7 @@ function ApiSection({ title, value, presets, onChange, testMode, test, onTest, c
     if (!preset || preset.name === "自定义") return; // Custom 不覆盖现有值
     onChange("api_url", preset.url);
     onChange("provider", preset.provider);
-    // 模型不随预设切换（用户决策：预设只改 API 地址，模型名称保持用户自选）
+    // 模型不随预设切换
   };
 
   const urlId = `${testMode}-url`;
@@ -214,10 +214,10 @@ export default function ConfigPage() {
   const setApiTest = useConfigStore((s) => s.setApiTest);
 
   /** 返回目标：固定回主页（文献库）。
-   *  2026-09-09 页面逻辑重规划：导航层级为 文献库 ← 阅读页/设置页，
-   *  pdfStore 的 pages 在返回主页后仍驻留内存，若按「有结果就回阅读页」
-   *  判断，用户从主页进设置点返回会被弹回阅读页（返回循环 bug），
-   *  故不再依赖内存状态判断。 */
+   * 页面逻辑重规划：导航层级为 文献库 ← 阅读页/设置页，
+   * pdfStore 的 pages 在返回主页后仍驻留内存，若按「有结果就回阅读页」
+   * 判断，用户从主页进设置点返回会被弹回阅读页（返回循环 bug），
+   * 故不再依赖内存状态判断。 */
   const backTarget = "/";
 
   useEffect(() => {
@@ -293,7 +293,7 @@ export default function ConfigPage() {
       setSaving(false);
       return;
     }
-    // 2026-09-08 用户决策：保存时自动补测「在当前表单值下还没测成功过」的
+    // 既定决策：保存时自动补测「在当前表单值下还没测成功过」的
     // 服务（结果回显在各区块的测试按钮旁）；两个服务都已测成功则直接保存，
     // 不再重复请求。测试结果不阻塞保存（本地 Ollama 离线也允许保存）。
     const needTest = (["ocr", "text"] as const).filter((m) => {
@@ -386,7 +386,7 @@ export default function ConfigPage() {
             </div>
           </div>
 
-          {/* 阶段12-T7：翻译质量档位说明。默认档保持免费（Qwen3-8B，
+          {/* 翻译质量档位说明。默认档保持免费（Qwen3-8B，
               免费卖点不破）；付费档仅是可选项，不改变自配端点能力 */}
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-3 text-xs leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
             <p className="mb-1 font-medium text-slate-700 dark:text-slate-300">
@@ -431,7 +431,8 @@ export default function ConfigPage() {
           )}
         </div>
 
-        {/* 阶段9-T5：AGPL 合规一行声明（应用无独立关于页，设置页为唯一落点） */}
+        {/* AGPL 合规一行声明（应用无独立关于页，设置页为唯一落点） */}
+
         <p className="text-xs leading-relaxed text-slate-400 dark:text-slate-500">
           「原版PDF·左右对照」排版对照功能基于开源项目 BabelDOC（AGPL-3.0，版本
           0.6.4）经独立子进程调用实现，版权归 funstory-ai 及 BabelDOC 原作者所有。

@@ -1,4 +1,4 @@
-"""split_into_blocks 单元测试（阶段1，开发流程 §4.1）。
+"""split_into_blocks 单元测试。
 
 纯函数测试：不发起任何网络请求，不依赖 API Key。
 运行：.venv/Scripts/python.exe -m pytest backend/tests/ -q

@@ -1,4 +1,4 @@
-"""持久化文档索引（阶段6-T2，2026-09-08 用户需求：主页展示已翻译文章）。
+"""持久化文档索引。
 
 管线 done 时 upsert 一条记录到数据目录（%APPDATA%/pdf-reader/）下的
 docs_index.json；此前管线结果只存内存 _jobs（TTL 淘汰），重启后主页
@@ -6,7 +6,7 @@ docs_index.json；此前管线结果只存内存 _jobs（TTL 淘汰），重启�
 
 - doc_id = pdf_hash 前 16 位（与 job_id 前缀、images/ 目录名一致）；
 - file_mtime 记录翻译时的源文件 mtime：可重建 job_id（pdf_hash16_mtime），
-  T3 重开文档时用于定位该次翻译会话；
+  重开文档时用于定位该次翻译会话；
 - 原子写沿用 write_cache 的 tmp + os.replace 模式，防半截 JSON；
 - 读取侧防御性容错：文件缺失/损坏一律返回空列表（索引可随时重建，
   丢索引只是丢主页列表，不影响任何缓存数据）。
@@ -87,7 +87,7 @@ def _atomic_write(data_dir: str, data, filename: str = INDEX_FILENAME) -> None:
         raise
 
 
-# ---------------- 文件夹管理（2026-09-09 靠岸学术风格：侧边栏文件夹分组） ----------------
+# ---------------- 文件夹管理 ----------------
 # 独立 folders.json，与 docs_index.json 解耦：丢文件夹文件只丢分组，不丢文档记录。
 
 
@@ -167,7 +167,7 @@ def set_doc_folder(data_dir: str, doc_id: str, folder_id) -> bool:
 
 
 def rename_doc(data_dir: str, doc_id: str, title: str) -> bool:
-    """改文献显示名（2026-09-13 用户反馈：列表名字没法改）。仅改索引标题，
+    """改文献显示名。仅改索引标题，
     不动源文件；doc_id 不存在或标题为空返回 False。"""
     title = str(title or "").strip()
     if not title:

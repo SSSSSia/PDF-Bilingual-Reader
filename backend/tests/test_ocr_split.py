@@ -15,7 +15,7 @@ def test_paragraphs_kept():
 
 
 def test_long_paragraph_stays_single_block():
-    # 决策（用户反馈"排版都是一句一句的"）：纯段落级切块，不做句级拆分。
+    # 决策：纯段落级切块，不做句级拆分。
     # 长段即使超过 300 字也保持为一个完整 block，由翻译层合并批量处理。
     sent = "这是一句测试文本。"
     long = sent * 60  # 约 600 字

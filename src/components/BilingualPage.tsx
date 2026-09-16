@@ -17,9 +17,9 @@ import { useBabelDocStore } from "../stores/babeldocStore";
 // 纯图片块（图表快照）：后端已令译文=原文，前端整行居中渲染一次
 const isPureImage = (t: string) => /^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(t);
 
-/** 单块行卡片（阶段11-T1）：memo 化——applyBlockPatches 批量补丁下未触及
- *  块的对象引用保持稳定，浅比较直接跳过重渲染；这是流式翻译不再整列表
- *  重渲的关键。content-visibility:auto 让视口外内容不参与渲染。 */
+/** 单块行卡片：memo 化——applyBlockPatches 批量补丁下未触及
+ * 块的对象引用保持稳定，浅比较直接跳过重渲染；这是流式翻译不再整列表
+ * 重渲的关键。content-visibility:auto 让视口外内容不参与渲染。 */
 const BilingualBlockRow = memo(function BilingualBlockRow({
   block,
 }: {
@@ -32,11 +32,13 @@ const BilingualBlockRow = memo(function BilingualBlockRow({
         style={{ contentVisibility: "auto", containIntrinsicSize: "auto 260px" }}
       >
         <div className="py-3 pr-2">
-          {/* 原文栏不显示「译」按钮：只有译文栏可生成译制图（用户反馈 2026-09-08） */}
+          {/* 原文栏不显示「译」按钮：只有译文栏可生成译制图 */}
+
           <TranslatableImage md={block.original} interactive={false} />
         </div>
         <div className="py-3 md:border-l md:border-slate-200 md:pl-2 dark:md:border-slate-700">
           {/* 图表默认右栏也显示原图；表格可点按生成译制图 */}
+
           <TranslatableImage md={block.translated || block.original} />
         </div>
       </div>
@@ -48,10 +50,10 @@ const BilingualBlockRow = memo(function BilingualBlockRow({
       style={{ contentVisibility: "auto", containIntrinsicSize: "auto 160px" }}
     >
       <div className="paper-font group relative py-3 pr-2 text-justify text-slate-900 dark:text-slate-100">
-        {/* 悬停浮现的单块翻译/重翻按钮（2026-09-07 用户需求）；
+        {/* 悬停浮现的单块翻译/重翻按钮；
             公式块（含纯公式/混合）只出「式」——识别成功后纯公式
             直出 LaTeX，混合块替换原文并自动重译（管线翻译完成后
-            也会自动跑一遍，按钮作手动重试入口，2026-09-08） */}
+            也会自动跑一遍，按钮作手动重试入口） */}
         <span className="absolute right-1 top-2 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           {block.formula_hint ? (
             <FormulaButton block={block} />
@@ -65,6 +67,7 @@ const BilingualBlockRow = memo(function BilingualBlockRow({
         {block.translated ? (
           <>
             {/* 单列模式下给译文加个小标签，区分原文 */}
+
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-blue-500 md:hidden dark:text-blue-400">
               译文
             </span>
@@ -81,24 +84,24 @@ const BilingualBlockRow = memo(function BilingualBlockRow({
 });
 
 /**
- * 左右对照模式：整篇连续滚动（无分页，对标 Scholaread，用户决策 2026-09-06）。
+ * 左右对照模式：整篇连续滚动。
  * 对齐采用网格行配对——每一行 = 一个 block 的「原文 | 译文」，
- * DOM 结构保证左右严格同行（阶段3-T1 提前落地），滚动天然同步，
+ * DOM 结构保证左右严格同行，滚动天然同步，
  * 不再需要旧的百分比滚动同步（useScrollSync 已退役）。
  * content-visibility:auto 让长文档只渲染视口附近内容，滚动性能不随页数劣化。
- * 阶段7-T1：根容器挂 Ctrl+滚轮全局缩放（hook），内容区经 --reader-zoom
+ * 根容器挂 Ctrl+滚轮全局缩放（hook），内容区经 --reader-zoom
  * 缩放 prose 根字号（工具栏/页签为 chrome 不缩放；原版分支由 pdfjs scale 走）。
  */
 export default function BilingualPage() {
   const { pages, isLoading, progress, error, file } = usePdfStore();
   const readerMode = useUiStore((s) => s.readerMode);
-  // 阶段7-T2：用户未手动设置过缩放（null）时，重排版缺省 100%（排版基准）
+  // 用户未手动设置过缩放（null）时，重排版缺省 100%（排版基准）
   const zoom = useUiStore((s) => s.zoom) ?? 1;
   const zoomRef = useZoomWheel<HTMLDivElement>();
   const blocks = useMemo(() => pages.flatMap((p) => p.blocks), [pages]);
-  // F5 后会话清空，但 BabelDOC 任务已被静默重接管（阶段11-T5）：此时
+  // F5 后会话清空，但 BabelDOC 任务已被静默重接管：此时
   // 不显示无会话门禁，直接呈现排版对照视图（进度/产物），否则用户卡在
-  // 「请先上传 PDF」门禁页（2026-09-12 用户反馈）
+  // 「请先上传 PDF」门禁页
   const babeldocActive = useBabelDocStore(
     (s) => s.phase === "running" || s.phase === "done",
   );
@@ -123,7 +126,7 @@ export default function BilingualPage() {
   }
 
   return (
-    /* 阶段10-T4：阅读页=纵向 flex 壳层（工具栏/页签/进度 shrink-0，内容通顶滚动） */
+    /* 阅读页=纵向 flex 壳层（工具栏/页签/进度 shrink-0，内容通顶滚动） */
     <div ref={zoomRef} className="flex h-full min-h-0 flex-col">
       <ReaderToolbar />
       <ReaderTabs />
@@ -137,8 +140,8 @@ export default function BilingualPage() {
         </div>
       )}
 
-      {/* 原版PDF 组（阶段7-T3 分组）：点击翻译=pdfjs 原样渲染 + 块坐标译文浮层；
-          左右对照=T4 左渲染右译文锚定对照；翻译进度见底部状态条。
+      {/* 原版PDF 组：点击翻译=pdfjs 原样渲染 + 块坐标译文浮层；
+          左右对照=左渲染右译文锚定对照；翻译进度见底部状态条。
           无会话但 BabelDOC 重接管运行中 → 直接呈现对照视图（F5 恢复） */}
       {readerMode === "original_bilingual" ||
       (blocks.length === 0 && babeldocActive) ? (
@@ -152,7 +155,8 @@ export default function BilingualPage() {
           className="mx-auto max-w-6xl px-4 md:px-6"
           style={{ "--reader-zoom": zoom } as CSSProperties}
         >
-          {/* 窄窗口降级为单列（阶段3-T1 残余）：原文在上、译文在下 */}
+          {/* 窄窗口降级为单列：原文在上、译文在下 */}
+
           <div className="sticky top-0 z-10 hidden grid-cols-2 border-b border-slate-200 bg-slate-50/95 backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/95 md:grid">
             <div className="py-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               原文
@@ -171,7 +175,7 @@ export default function BilingualPage() {
       </div>
       )}
 
-      {/* 翻译进行中：底部状态条（2026-09-11 用户反馈：顶部通栏进度条不美观，
+      {/* 翻译进行中：底部状态条（实测反馈：顶部通栏进度条不美观，
           移到窗口底边零遮挡；与工具栏同视觉语言，翻译完成即消失） */}
       {isLoading && (
         <div

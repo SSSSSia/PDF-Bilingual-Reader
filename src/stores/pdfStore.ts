@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { PageResult, PipelineResult } from "../types";
 
-/** 单块内容补丁（阶段11-T1）：流式轮询 diff 产物，按 page+block_id 定位。
- *  字段缺省 = 该字段不变。 */
+/** 单块内容补丁：流式轮询 diff 产物，按 page+block_id 定位。
+ * 字段缺省 = 该字段不变。 */
 export interface BlockPatch {
   page: number;
   blockId: number;
@@ -20,27 +20,27 @@ interface PdfState {
   progress: number;
   error: string | null;
   result: PipelineResult | null;
-  /** 当前活跃会话 key（阶段8-T1 多会话）：doc_id 或 job_id；null = 无会话。
-   *  pdfStore 仅作"活跃会话"载体，非活跃会话快照存 sessionsStore。 */
+  /** 当前活跃会话 key：doc_id 或 job_id；null = 无会话。
+   * pdfStore 仅作"活跃会话"载体，非活跃会话快照存 sessionsStore。 */
   sessionKey: string | null;
 
   setFile: (file: File | null) => void;
   setFilePath: (path: string | null) => void;
   setPages: (pages: PageResult[]) => void;
-  /** 手动单块翻译回写（2026-09-07）：按 page+block_id 定位更新译文 */
+  /** 手动单块翻译回写：按 page+block_id 定位更新译文 */
   updateBlockTranslated: (
     page: number,
     blockId: number,
     translated: string,
   ) => void;
   /**
-   * 原文替换（2026-09-08）：公式混合块「式」识别后用干净 markdown
+   * 原文替换：公式混合块「式」识别后用干净 markdown
    * （英文正文+$..$ 公式）替换拍平原稿，原文栏同步变干净
    */
   updateBlockOriginal: (page: number, blockId: number, original: string) => void;
-  /** 流式批量补丁（阶段11-T1）：单次 set 应用多块变更，替代整表 setPages——
-   *  未触及 page/block 引用保持不变，React.memo 行组件据此跳过重渲染；
-   *  不可变语义与阶段8 快照 captureActive/activate 完全兼容 */
+  /** 流式批量补丁：单次 set 应用多块变更，替代整表 setPages——
+   * 未触及 page/block 引用保持不变，React.memo 行组件据此跳过重渲染；
+   * 不可变语义与快照 captureActive/activate 完全兼容 */
   applyBlockPatches: (patches: BlockPatch[]) => void;
   setCurrentPage: (page: number) => void;
   setLoading: (loading: boolean) => void;

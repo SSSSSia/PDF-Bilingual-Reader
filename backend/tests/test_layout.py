@@ -1,4 +1,4 @@
-"""阶段5-T1 单元测试：pipeline.layout.attach_block_bboxes 块级 bbox 标注。"""
+"""单元测试：pipeline.layout.attach_block_bboxes 块级 bbox 标注。"""
 
 import pymupdf
 

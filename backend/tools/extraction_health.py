@@ -1,11 +1,11 @@
-"""提取质量批量体检工具（2026-09-08 立；阶段12-T8 加 VLM 路线列）。
+"""提取质量批量体检工具。
 
 背景：阶段 5 验收期用户连续反馈多个提取层长尾问题（伪标题/斜体误判
 上标/跨栏粘连/碎片段），均为 pymupdf4llm 启发式在不同版式下的误判
 形态。本工具对论文集全页跑文本层提取，用「修复规则的逆向判定」
 量化各维度残留问题率——残留应为 0（修复生效），不为 0 的是新形态。
 
-阶段12-T8：数字页主路线换 VLM 后，体检加第二张表——每篇走生产
+数字页主路线换 VLM 后，体检加第二张表——每篇走生产
 parse_page_verified（原始解析命中页级缓存，回归重放零 API 成本），
 统计 vlm/降级页数、交叉校验 bag、定界公式段数（textlayer 路线恒 0，
 对照用）。textlayer 逆向判定保留：它是降级路径，仍需守底线。
@@ -41,7 +41,7 @@ DOCS = ROOT / "docs"
 TEST_DIR = ROOT / "test_ocr"
 
 # 体检论文集：来源/版式多样性优先（ACL双栏/NeurIPS单栏/IEEE双栏/arXiv单栏）
-# 阶段12-T8 语料补齐：本地 test_ocr 不存在时落到用户论文目录（E 盘实测语料）
+# 语料补齐：本地 test_ocr 不存在时落到用户论文目录（E 盘实测语料）
 _PAPERS_LOCAL = [
     "DALK-EMNLP.pdf",     # ACL/EMNLP 2024 双栏（粘连重灾区）
     "GraphRAG-Bench.pdf", # arXiv 单栏（数学密集）
@@ -52,19 +52,17 @@ _PAPERS_LOCAL = [
     "RAG.pdf",            # NeurIPS 2020 单栏
 ]
 _PAPERS_USER = [
-    r"E:\ZiLiao\论文阅读\GraphRAG&KGQA\DALK.pdf",
-    r"E:\ZiLiao\论文阅读\GraphRAG&KGQA\FG-RAG.pdf",
-    r"E:\ZiLiao\论文阅读\2017Attention is all you need.pdf",
-    r"E:\ZiLiao\论文阅读\GraphRAG&KGQA\A Survey of Graph Retrieval-Augmented Generation for Customized Large Language Models.pdf",
+    # 亦可经环境变量 PDF_CORPUS 指向自有论文（分号分隔多个路径）
 ]
 
 
 def _papers() -> list[Path]:
-    """test_ocr 有文件用之；否则用用户论文目录实测语料。"""
+    """test_ocr 有文件用之；否则读 PDF_CORPUS 环境变量指定的语料。"""
     local = [TEST_DIR / n for n in _PAPERS_LOCAL if (TEST_DIR / n).exists()]
     if local:
         return local
-    return [Path(p) for p in _PAPERS_USER if os.path.isfile(p)]
+    env = os.environ.get("PDF_CORPUS", "")
+    return [Path(p) for p in env.split(";") if p and os.path.isfile(p)]
 
 
 MAX_PAGES = 12  # 每篇页数上限（控制体检时长；首页版式问题最密集）
@@ -181,7 +179,7 @@ def check_paper(path: Path) -> dict:
 
 
 async def check_paper_vlm(path: Path, n_pages: int) -> dict:
-    """阶段12-T8：VLM 主路线体检（生产 parse_page_verified，原始解析
+    """VLM 主路线体检（生产 parse_page_verified，原始解析
     命中页级缓存——首次全量跑一遍后，回归重放零 API 成本）。"""
     from cache.file_cache import file_hash
     from ocr import vlm_parse
@@ -236,7 +234,7 @@ def main() -> None:
     lines = [
         "# 提取质量批量体检报告",
         "",
-        f"- 体检时间：{time.strftime('%Y-%m-%d')}（阶段12-T8：textlayer 降级路径体检"
+        f"- 体检时间：{time.strftime('%Y-%m-%d')}（textlayer 降级路径体检"
         " + 生产 VLM 主路线列）",
         f"- 论文集：{len(results)} 篇，版式覆盖 ACL/EMNLP 双栏、NeurIPS 单栏、"
         "IEEE/CVPR 双栏、arXiv 单栏；每篇最多 12 页",
@@ -266,7 +264,7 @@ def main() -> None:
                 samples.append(f"- [{name}] {x!r}")
         if samples:
             lines += [f"## {title}", ""] + samples[:9] + [""]
-    # 阶段12-T8：VLM 主路线体检表
+    # VLM 主路线体检表
     lines += [
         "## VLM 主路线（生产 parse_page_verified）",
         "",

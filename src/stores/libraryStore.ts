@@ -9,7 +9,7 @@ import {
 import type { DocMeta, FolderMeta } from "../types";
 
 /**
- * 文献库共享状态（2026-09-09 靠岸学术风格改版）：
+ * 文献库共享状态：
  * Sidebar（文件夹树）与 MainPage（文档网格）共用同一份数据，
  * 归类/建删文件夹后统一刷新，避免两处各自拉取出现不同步。
  */

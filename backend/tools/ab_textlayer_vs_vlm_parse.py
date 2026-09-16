@@ -1,23 +1,21 @@
-r"""文本层提取 vs 生产 VLM 路线的 A/B 回归工具（2026-09-14 立，阶段12-T8 固化）。
+r"""文本层提取 vs 生产 VLM 路线的 A/B 回归工具。
 
-初版回答换引擎决策问题；阶段12 起固化为回归工具：Route B 不再是
+初版回答换引擎决策问题；起固化为回归工具：Route B 不再是
 脚本自带的裸调用，而是**生产管线同款** `vlm_parse.parse_page_verified`
 （快照+遮罩 → PaddleOCR-VL → 交叉校验降级 → 插回/顺序兜底）——原始
 解析走 vlm-parse-v1 页级缓存，回归重放零 API 成本；降级页在表中以
 src=textlayer 标注。
 
-与 2026-09-08 的 ab_textlayer_vs_ocr.py（docs/archive/文本层vsOCR对比.md）
+与 的 ab_textlayer_vs_ocr.py
 同源但维度更全：char_sim（顺序敏感）、bag_sim（顺序无关内容完整度）、
 order（双栏列序配对正确率）、formula（定界 LaTeX 段数）、table（表格
 标记 vs 快照数）。截断统计由生产 parse_page 内部处理（trunc 计数透传）。
 
 用法：
-    # 默认语料（4 篇真实论文 12 页）
-    .venv/Scripts/python.exe backend/tools/ab_textlayer_vs_vlm_parse.py
-    # 自定义语料/页
     .venv/Scripts/python.exe backend/tools/ab_textlayer_vs_vlm_parse.py \
-        --pdf "D:\x.pdf" --pdf "D:\y.pdf" --pages 0,1,4
-输出：docs/VLM结构化解析对比.md
+        --pdf "a.pdf" --pdf "b.pdf" --pages 0,1,4
+    （语料自备，版式尽量多样：双栏会议/单栏期刊/数学密集各取一两篇）
+输出：对比报表（--out 指定，缺省落 docs/）
 """
 import argparse
 import asyncio
@@ -43,13 +41,10 @@ from ocr.textlayer import extract_pages  # noqa: E402
 
 DOCS = BACKEND.parent / "docs"
 
-# 默认语料：真实论文（用户论文目录），版式覆盖 EMNLP/ACM 双栏、NeurIPS 单栏
+# 语料缺省为空，经 --pdf/--pages 传入（见文件头用法）；test_ocr 样张兜底
 PAPERS: list[tuple[str, list[int]]] = [
-    (r"E:\ZiLiao\论文阅读\GraphRAG&KGQA\DALK.pdf", [0, 1, 4, 8]),
-    (r"E:\ZiLiao\论文阅读\GraphRAG&KGQA\FG-RAG.pdf", [0, 2, 4]),
-    (r"E:\ZiLiao\论文阅读\2017Attention is all you need.pdf", [0, 1, 3]),
-    (r"E:\ZiLiao\论文阅读\GraphRAG&KGQA\A Survey of Graph Retrieval-Augmented Generation for Customized Large Language Models.pdf", [0, 5]),
-]
+    (str(BACKEND.parent / "test_ocr" / "GraphRAG-Bench.pdf"), [0])
+] if (BACKEND.parent / "test_ocr" / "GraphRAG-Bench.pdf").exists() else []
 
 _IMG_REF = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _ALNUM = re.compile(r"[^a-z0-9]+")
@@ -137,7 +132,7 @@ def order_score(out_md: str, cols) -> float | None:
     return ok / (len(lp) * len(rp))
 
 
-# ── Route B：生产管线同款（vlm_parse.parse_page_verified，T8 固化）────
+# ── Route B：生产管线同款（vlm_parse.parse_page_verified，固化）────
 
 
 def _cfg_dir() -> str:
@@ -149,8 +144,8 @@ async def vlm_parse_page(
 ) -> dict:
     """整页解析（生产链路：版面区域→快照+遮罩→VLM→校验降级→插回/结构消费）。
     原始解析命中 vlm-parse-v2 页级缓存——回归重放零 API 成本；layout
-    （T9.5 起接入）缺省 None = 无版面信号行为，真跑生产口径请传入
-    LayoutProvider。注意：真值仍是全页字符流（raw 口径）——T9 后版权/
+    （接入）缺省 None = 无版面信号行为，真跑生产口径请传入
+    LayoutProvider。注意：真值仍是全页字符流（raw 口径）——版权/
     venue 段被有意剔除，这些页的 bag 会小幅回落，属预期而非回归。"""
     t0 = time.perf_counter()
     out = await vlm_parse.parse_page_verified(
@@ -230,7 +225,7 @@ async def main() -> None:
         tl_mds = extract_pages(path, pages, image_dir)  # 现行生产管线（降级路径）
         tl_elapsed = time.perf_counter() - t0
 
-        # T9.5：Route B 与生产同源——版面模型区域先行（子进程+按页缓存），
+        # Route B 与生产同源——版面模型区域先行（子进程+按页缓存），
         # 失败自动降级为无版面信号（生产同款兜底语义）
         from ocr.layout_model import LayoutProvider
 
@@ -317,11 +312,10 @@ async def main() -> None:
         "# 文本层提取 vs PaddleOCR-VL 整页结构化解析：A/B 对比报告",
         "",
         f"- 日期：{time.strftime('%Y-%m-%d')} ｜ 模型：{ocr_cfg.get('model')} ｜ "
-        "脚本：`backend/tools/ab_textlayer_vs_vlm_parse.py`（阶段12-T8 固化："
+        "脚本：`backend/tools/ab_textlayer_vs_vlm_parse.py`（固化："
         "Route B 走生产 parse_page_verified，原始解析命中页级缓存）",
         f"- 样本：{len(papers)} 篇真实论文 × 共 {len(rows)} 页（含双栏/单栏、图表公式密集页）",
-        "- 真值：PDF 内嵌字符流（get_text，y 序）；sim=NFKC 去空白 SequenceMatcher（与"
-        " docs/archive/文本层vsOCR对比.md 同口径）；bag=顺序无关字符 F1（内容完整度）；"
+        "- 真值：PDF 内嵌字符流（get_text，y 序）；sim=NFKC 去空白 SequenceMatcher）；bag=顺序无关字符 F1（内容完整度）；"
         "order=双栏页「左块先于右块」配对正确率（1.0=列序正确，~0.5=y 带交错，"
         "单栏页不适用）。",
         "- Route A=textlayer 降级路径（pymupdf4llm classic + 全部启发式）；"

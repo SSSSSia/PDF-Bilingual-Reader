@@ -51,7 +51,7 @@ def translate_key(
     src_hash: str, target_lang: str, model: str, prompt_version: str = ""
 ) -> str:
     """翻译缓存键。prompt_version 为空时与旧版兼容；传入 openai_compat.PROMPT_VERSION
-    后，提示词升级自动使旧翻译缓存失效（阶段2-T2，与 OCR 侧 TEXT_LAYER_MODEL 对齐）。"""
+    后，提示词升级自动使旧翻译缓存失效。"""
     return _sha1("tr", CACHE_VERSION, prompt_version, src_hash, target_lang, model)
 
 

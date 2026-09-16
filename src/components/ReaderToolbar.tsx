@@ -11,14 +11,14 @@ import { usePdfStore } from "../stores/pdfStore";
 import ExportBar from "./ExportBar";
 
 /**
- * 阅读页共享工具栏（阶段10 二次改造 2026-09-10，mockup 方案 A 用户确认）：
- * 通栏底色条（与标题栏同族）+ 三段式——左「← 文档库」、中模式分段控件居中、
+ * 阅读页共享工具栏：
+ * 通栏底色条（与标题栏同族） + 三段式——左「← 文档库」、中模式分段控件居中、
  * 右缩放/主题/导出组。
  * - 由 BilingualPage 与 InlinePage 共用，保证两个视图工具栏完全一致。
- * - 阶段6-T3：源 PDF 缺失（重开已删/移动文档）时「原版PDF」组禁用并提示。
- * - 阶段7-T1：全局缩放控件（−/百分比/＋，与 Ctrl+滚轮共用 uiStore.zoom 并持久化）。
- * - 阶段7-T3：模式选择器分「重排版」「原版PDF」两组（组名嵌控件内非交互标签）；
- *   2026-09-10 验收决策：原版PDF·左右对照 = BabelDOC 排版对照（DualPdfPage）。
+ * - 源 PDF 缺失（重开已删/移动文档）时「原版PDF」组禁用并提示。
+ * - 全局缩放控件（−/百分比/＋，与 Ctrl+滚轮共用 uiStore.zoom 并持久化）。
+ * - 模式选择器分「重排版」「原版PDF」两组（组名嵌控件内非交互标签）；
+ * 验收决策：原版PDF·左右对照 = BabelDOC 排版对照（DualPdfPage）。
  * - 原页内页签条在 Tauri 下已升格进标题栏；浏览器 dev 由 ReaderTabs 渲染。
  */
 export default function ReaderToolbar() {
@@ -28,7 +28,7 @@ export default function ReaderToolbar() {
   const { filePath, file } = usePdfStore();
   const navigate = useNavigate();
   const sourceMissing = !filePath;
-  // 阶段7-T2：显示与边界判断用有效缩放值（未设置过时按形态回落缺省：
+  // 显示与边界判断用有效缩放值（未设置过时按形态回落缺省：
   // 原版 70% / 重排版 100%），与阅读区实际渲染一致
   const zoom = effectiveZoom(zoomRaw, readerMode);
   // 文章标题：重开文档时为 doc.title，新翻译时为文件名（去 .pdf 后缀）
@@ -45,7 +45,7 @@ export default function ReaderToolbar() {
   // 原版PDF 组（两种形态任一激活）：缩放缺省/重置提示均按原版语义
   const originalActive = readerMode !== "parallel";
 
-  // 暗色切换（阶段10 回归修复：阅读页无侧边栏，入口移到本工具栏），
+  // 暗色切换，
   // 持久化与主页一致走 config.json ui.theme
   const handleToggleTheme = async () => {
     const next = theme === "dark" ? "light" : "dark";
@@ -54,7 +54,7 @@ export default function ReaderToolbar() {
     await saveTheme(next);
   };
 
-  // 选中态统一样式（2026-09-13 用户反馈：重排版组选中几乎不可见）——
+  // 选中态统一样式——
   // 与「原版PDF·左右对照」同款：白底胶囊 + 蓝字 + 细描边
   const segBtn = (active: boolean) =>
     `rounded-md px-3 py-1 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${
@@ -66,6 +66,7 @@ export default function ReaderToolbar() {
   return (
     <div className="flex min-h-12 shrink-0 flex-wrap content-center items-center gap-x-3 gap-y-1 border-b border-slate-200 bg-slate-50 px-4 py-1 dark:border-slate-700 dark:bg-slate-900">
       {/* 左：返回文档库（Tauri 下标题栏 logo 承担返回，此处仅浏览器 dev 显示） */}
+
       <div className="flex min-w-0 flex-1 items-center">
         {"__TAURI_INTERNALS__" in window ? null : (
           <Link
@@ -79,6 +80,7 @@ export default function ReaderToolbar() {
       </div>
 
       {/* 中：模式分段控件（mockup 方案 A 居中为主角） */}
+
       <div
         className="inline-flex shrink-0 items-center rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800"
         role="tablist"
@@ -157,6 +159,7 @@ export default function ReaderToolbar() {
       </div>
 
       {/* 右：缩放 / 主题 / 导出 */}
+
       <div className="flex flex-1 shrink-0 items-center justify-end gap-2">
         <div
           className="inline-flex shrink-0 items-center rounded-lg border border-slate-200 bg-white px-1 py-0.5 dark:border-slate-700 dark:bg-slate-800"
@@ -193,7 +196,8 @@ export default function ReaderToolbar() {
             ＋
           </button>
         </div>
-        {/* 阶段10 回归修复：阅读页主题切换入口（原在侧边栏） */}
+        {/* 回归修复：阅读页主题切换入口（原在侧边栏） */}
+
         <button
           onClick={handleToggleTheme}
           title={theme === "dark" ? "切换到亮色" : "切换到暗色"}

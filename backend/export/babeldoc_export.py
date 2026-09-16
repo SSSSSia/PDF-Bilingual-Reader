@@ -1,4 +1,4 @@
-"""BabelDOC 双语 PDF 导出服务（阶段9-T1）。
+"""BabelDOC 双语 PDF 导出服务。
 
 职责：
 - POST /api/export/babeldoc          启动导出任务（子进程跑 babeldoc_worker.py）
@@ -9,7 +9,7 @@
 - 隔离：BabelDOC 依赖重（onnx 等），装在项目根 .venv-babeldoc 独立 venv；
   子进程用该 venv 的 python 跑 worker，与主后端环境完全隔离。
 - 幂等缓存：产物目录 <cache>/babeldoc/<pdf_hash>/<model_slug>/，
-  dual PDF 已存在即视为命中，直接返回 done（复用 T0 产物零成本重开）。
+  dual PDF 已存在即视为命中，直接返回 done（复用 产物零成本重开）。
 - 同一 (pdf_hash, model) 已有 running 任务时幂等返回该任务。
 - 安全：api_key 仅经 argv 传给 worker 子进程（BabelDOC 不支持环境变量读取），
   本模块所有日志/异常/任务表均不含 key。
@@ -36,14 +36,14 @@ _jobs: dict[str, dict] = {}
 _PUMP_TASKS: dict[str, asyncio.Task] = {}
 
 _STATUS = ("pending", "running", "done", "error", "cancelled")
-# 全局 worker 并发上限（T0 实测单 worker RSS 峰值 ~1.5GB；原 2 为 T2 裁剪
-# 后保留值）。2026-09-15 用户拍板收到 1：前端单任务模型 + 任务可见性按
+# 全局 worker 并发上限（实测单 worker RSS 峰值 ~1.5GB；原 2 为 裁剪
+# 后保留值）。既定决策收到 1：前端单任务模型 + 任务可见性按
 # 「正在生成的那一篇」呈现，同时只跑一篇语义最清晰，内存最稳
 _MAX_WORKERS = 1
 
 
 def list_running_exports() -> list[dict]:
-    """运行中导出任务列表（阶段11-T5 扩展）：App 启动时据此静默重接管。"""
+    """运行中导出任务列表：App 启动时据此静默重接管。"""
     return [
         {
             "job_id": jid,
@@ -70,7 +70,7 @@ def _venv_python() -> str | None:
 
 
 def venv_python(data_dir: str | None = None) -> str | None:
-    """运行时 python 解析链（阶段9-T6 直接捆绑）：
+    """运行时 python 解析链：
     1. 开发态项目 venv .venv-babeldoc；
     2. 随包运行时：与后端 exe 同级的 babeldoc-runtime/（tauri resources 安装位，
        PyInstaller sys.executable 恒指 exe 本体，打包态即安装目录）；
@@ -172,9 +172,9 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
     if not api_url or not api_key or not model:
         raise ValueError("API 配置不完整（api_url / api_key / model），请先在设置中完成配置")
 
-    # 局部变量不得与模块级 venv_python() 同名（同名赋值会把函数内该名字
-    # 整体变为局部变量，RWS 调用即 UnboundLocalError——2026-09-12 T6 重构
-    # 引入，导出启动恒 500，2026-09-15 T10 人工验收首次实测发现）
+    # 局部变量不得与模块级 venv_python 同名（同名赋值会把函数内该名字
+    # 整体变为局部变量，RWS 调用即 UnboundLocalError——重构
+    # 引入，导出启动恒 500，人工验收首次实测发现）
     runtime_python = venv_python(os.path.dirname(os.path.abspath(cache_dir)))
     if not runtime_python:
         raise ValueError(
@@ -218,8 +218,8 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
         ):
             return _public(job)
 
-    # 阶段11-T2 子集（T0 裁剪后保留）：全局 worker 并发上限。T0 实测单 worker
-    # RSS 峰值 ~1.5GB，并发叠加是 2026-09-11 内存耗尽崩溃的同源风险；
+    # 子集（裁剪后保留）：全局 worker 并发上限。实测单 worker
+    # RSS 峰值 ~1.5GB，并发叠加是 内存耗尽崩溃的同源风险；
     # 超限直接拒绝（前端错误卡提示可读），不做复杂排队
     running = sum(1 for j in _jobs.values() if j["status"] in ("pending", "running"))
     if running >= _MAX_WORKERS:
@@ -250,7 +250,7 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
 
     # worker 诊断日志直接落盘（关键：绝不能用 PIPE 且不读——BabelDOC 日志
     # 写满 64KB 管道缓冲后 worker 会永久阻塞在 stderr 写上，表现为"假死"
-    # 卡在某个百分比。2026-09-10 真实论文 1h 不完成即此根因，实证
+    # 卡在某个百分比。真实论文 1h 不完成即此根因，实证
     # cache.v1.db-wal 在 19:41 后停止增长而进程存活）。
     log_path = os.path.join(out_dir, "worker.log")
     log_fh = open(log_path, "a", encoding="utf-8")
@@ -262,9 +262,9 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
         "--base-url", api_url,
         "--api-key", api_key,   # 仅进 argv，绝不写日志/任务表
         "--model", model,
-        "--qps", "6",           # 429：BabelDOC 内部 tenacity 重试兜底 + worker 应用层 qps 减半重跑（T4②）
-        "--max-pages-per-part", "200",  # T4③：大文档分批（未超页数不分批），进度/产物自动聚合合并
-        "--lang-in", "en",      # 阶段9 范围：英文学术论文 → 中文
+        "--qps", "6",           # 429：BabelDOC 内部 tenacity 重试兜底 + worker 应用层 qps 减半重跑（②）
+        "--max-pages-per-part", "200",  # ③：大文档分批（未超页数不分批），进度/产物自动聚合合并
+        "--lang-in", "en",      # 范围：英文学术论文 → 中文
         "--lang-out", "zh",
     ]
     try:
@@ -315,7 +315,7 @@ async def _pump(job: dict, proc: subprocess.Popen) -> None:
                 overall = float(event.get("overall") or 0)
                 job["progress"] = max(job.get("progress", 0), min(99.0, overall))
                 job["stage"] = str(event.get("stage") or job.get("stage") or "")
-                # 阶段11-T3 子集：worker RSS 阈值告警（每 job 一次）。2026-09-11
+                # 子集：worker RSS 阈值告警（每 job 一次）。
                 # 崩溃实证单 worker 峰值 ~1.5GB，超 2GB 即向崩溃工况演进
                 rss_mb = float(event.get("rss_mb") or 0)
                 if rss_mb >= 2048 and not job.get("_rss_warned"):
@@ -324,7 +324,7 @@ async def _pump(job: dict, proc: subprocess.Popen) -> None:
                         "BabelDOC worker RSS 告警 job_id=%s %.0fMB（阈值 2048MB）",
                         job_id, rss_mb,
                     )
-                # 每 10% 落一行后端日志（长任务可观测性，2026-09-10 用户反馈"1h 没完"排查困难）
+                # 每 10% 落一行后端日志
                 decile = int(job["progress"] // 10)
                 if decile > last_decile:
                     last_decile = decile
@@ -385,7 +385,7 @@ def _read_log_tail(job: dict, limit: int = 400) -> str:
 
 
 async def check_cached(file_path: str, translate_config: dict, cache_dir: str) -> dict:
-    """探测文档是否已有排版对照产物（阶段9 验收反馈：缓存命中不应再弹确认卡）。
+    """探测文档是否已有排版对照产物。
 
     前端进入「原版PDF·左右对照」时先调本接口：命中则免确认直接打开，
     未命中才弹「开始生成」确认卡。只读探测，无副作用。

@@ -3,7 +3,7 @@ import { usePdfStore } from "../stores/pdfStore";
 import { useSessionsStore } from "../stores/sessionsStore";
 
 /**
- * 阅读页签条（阶段8-T3 多会话阅读）：每篇打开的文献/翻译任务一个页签，
+ * 阅读页签条：每篇打开的文献/翻译任务一个页签，
  * 切换 = 会话快照交换（路由不变）。翻译中页签显示进度徽标且不可关闭；
  * 关闭活跃页签自动切换到最近使用的会话，全部关闭回文献库。
  * 仅在 ≥2 个会话时渲染（单会话时工具栏标题已足够）。
@@ -15,7 +15,7 @@ export default function ReaderTabs() {
   const sessionKey = usePdfStore((s) => s.sessionKey);
   const navigate = useNavigate();
 
-  // 2026-09-10 验收决策：Tauri 下页签升格进自绘标题栏（TitleBar 多开 tab），
+  // 验收决策：Tauri 下页签升格进自绘标题栏（TitleBar 多开 tab），
   // 本组件仅浏览器 dev 渲染
   if ("__TAURI_INTERNALS__" in window) return null;
 

@@ -1,4 +1,4 @@
-"""文件夹管理（2026-09-09 靠岸学术风格改版）：docs_index 文件夹层 + API 端点测试。"""
+"""文件夹管理：docs_index 文件夹层 + API 端点测试。"""
 
 import tempfile
 

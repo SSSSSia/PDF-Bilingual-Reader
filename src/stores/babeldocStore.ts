@@ -1,5 +1,5 @@
 /**
- * BabelDOC 双语 PDF 导出任务状态（阶段9-T2）。
+ * BabelDOC 双语 PDF 导出任务状态。
  *
  * 为什么是 store 而不是组件 useState：工具栏在「对照/紧跟/原版」三形态
  * 切换时会重挂载，轮询与进度不能随组件销毁而丢；任务属跨页面会话级状态。
@@ -30,11 +30,11 @@ interface BabelDocState {
   /** 当前文件路径（判断点击时是否换了一篇文档） */
   filePath: string | null;
   start: (filePath: string) => Promise<void>;
-  /** 重接管仍在运行的导出任务（阶段11-T5 扩展）：不经 POST，
-   *  直接恢复 running 态与轮询（App 启动发现 running 列表后调用） */
+  /** 重接管仍在运行的导出任务：不经 POST，
+   * 直接恢复 running 态与轮询（App 启动发现 running 列表后调用） */
   reattachRunning: (jobId: string, filePath: string, progress: number) => void;
-  /** 缓存探测（阶段9 验收反馈）：命中直接进入 done 态免确认打开，
-   *  未命中由调用方弹确认卡。仅 idle 态调用。 */
+  /** 缓存探测：命中直接进入 done 态免确认打开，
+   * 未命中由调用方弹确认卡。仅 idle 态调用。 */
   probeCached: (filePath: string) => Promise<boolean>;
   /** 取消进行中的任务（后端 kill 子进程；轮询会把状态收敛为 idle） */
   cancel: (jobId: string) => Promise<void>;

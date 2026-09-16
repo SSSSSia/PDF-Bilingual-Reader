@@ -21,7 +21,7 @@ function nodeText(node: unknown): string {
   return "";
 }
 
-// 阶段11-T1：react-markdown 对 props 做引用比较，此前每次 render 新建
+// react-markdown 对 props 做引用比较，此前每次 render 新建
 // 插件数组/components 对象会让其内部缓存失效、text 变化时全量重解析——
 // 提为模块级常量（text 不变时整个组件被 memo 跳过，不再走到这里）
 const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath];
@@ -30,7 +30,7 @@ const REHYPE_PLUGINS: PluggableList = [
 ];
 const allowAllUrls = (url: string) => url;
 const COMPONENTS: Components = {
-  // 中文斜体修正（用户实测"字体很奇怪"）：源文粗斜体（论文标题常见）
+  // 中文斜体修正：源文粗斜体（论文标题常见）
   // 保留 _.._ 标记 → <em> 斜体 → 中文没有真斜体字形，Windows
   // Chromium 回退渲染成楷体。中文排版规范强调用粗体不用斜体：
   // 含中文的 em 转加粗正体；纯西文 em 保持斜体（术语/书名惯例）
@@ -67,7 +67,7 @@ const COMPONENTS: Components = {
       />
     );
   },
-  // 学术宽表兜底（阶段3-T4）：列多时横向滚动，不撑破双栏布局
+  // 学术宽表兜底：列多时横向滚动，不撑破双栏布局
   table: ({ children }) => (
     <div className="overflow-x-auto">
       <table>{children}</table>
@@ -80,7 +80,7 @@ const COMPONENTS: Components = {
  * 旧实现当纯文本渲染导致排版错乱（实测问题），统一走 typography 排版。
  * 图片引用是本地绝对路径（文本层提取导出的论文插图），经 assetUrl 转为可访问 URL。
  *
- * urlTransform 必须覆写（2026-09-06 实测"图片显示不出来"根因）：
+ * urlTransform 必须覆写：
  * react-markdown v10 默认 defaultUrlTransform 只放行 http/https 等协议，
  * 本地盘符路径 `D:/...` 被当作未知协议 `d:` 整个剥成空串——img src 恒为空。
  * 内容全部来自用户本地 PDF 提取，信任来源，直接原样放行。
@@ -100,5 +100,5 @@ const MarkdownTextImpl = ({ text }: { text: string }) => {
   );
 };
 
-/** 阶段11-T1：memo 化——数百个块卡片流式翻译时，未收到新译文的块直接跳过渲染 */
+/** memo 化——数百个块卡片流式翻译时，未收到新译文的块直接跳过渲染 */
 export default memo(MarkdownTextImpl);

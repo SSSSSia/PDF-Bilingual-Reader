@@ -1,4 +1,4 @@
-"""run_pipeline 入口 fail-fast 守卫（2026-09-09 无 Key 异常处理补齐）。
+"""run_pipeline 入口 fail-fast 守卫。
 
 背景：管线各环节的 per-block 容错（_translate_chunk 减半重试、
 figtranslate 保留原文）会把异常吞成空译文——无 Key 时若不拦截，

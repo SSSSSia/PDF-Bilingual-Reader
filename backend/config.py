@@ -7,13 +7,13 @@ class Settings:
     """
     配置加载与热更新（R7）。
 
-    - init() 在应用启动时计算配置文件路径、创建缓存目录并首次加载。
-    - refresh() 每次处理任务前调用：若配置文件的修改时间(mtime)变化，自动重载，
+    - init 在应用启动时计算配置文件路径、创建缓存目录并首次加载。
+    - refresh 每次处理任务前调用：若配置文件的修改时间(mtime)变化，自动重载，
       无需重启后端即可生效（改完 API Key/模型后保存即可）。
     - 路径与 Rust 端保持一致：Windows -> %APPDATA%/pdf-reader/config.json，
       其他平台 -> ~/.pdf-reader/config.json。
 
-    阶段6-T4（持久化路径统一）：config.json / cache/ / docs_index.json /
+    （持久化路径统一）：config.json / cache/ / docs_index.json /
     cache/images/ 全部收敛在 data_dir（config.json 所在目录）之下；
     ~/.pdf-reader/ 仅作无 APPDATA 环境时的兜底轨，启动日志会打印实际生效目录。
     """
@@ -77,9 +77,9 @@ class Settings:
         }
 
     def _default_translate(self) -> dict:
-        # 默认英→中（2026-09-11 用户决策：学术阅读主场景是英文论文译中文）
+        # 默认英→中
         # 默认档 = 免费模型（产品卖点：Qwen3-8B 在 SiliconFlow 免费，
-        # 阶段12-T7 确认维持）。付费质量档（如 DeepSeek-V4-Flash，
+        # 确认维持）。付费质量档（如 DeepSeek-V4-Flash，
         # ¥1/M token≈每篇 ¥0.1）是用户可选升级，见设置页「质量档位」说明，
         # 不设为默认。
         return {

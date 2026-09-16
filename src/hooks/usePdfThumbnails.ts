@@ -24,7 +24,7 @@ type ThumbState = {
  * 设计要点：
  * - 复用单个 PDFDocumentProxy，避免重复解析。
  * - 逐页并发渲染（上限 RENDER_CONCURRENCY），每渲染完一页即通过 setState 增量更新，
- *   大文档也能渐进显示，不会长时间白屏。
+ * 大文档也能渐进显示，不会长时间白屏。
  * - 仅在 filePath 存在时工作；浏览器环境（非 Tauri）convertFileSrc 不可用，静默降级。
  */
 export function usePdfThumbnails() {

@@ -1,22 +1,22 @@
 import { create } from "zustand";
 
-/** readerMode（阶段5-T2/D6 立项，阶段7-T3 分组扩展）：
- *  parallel = 重排版（bilingual/inline 由 mode 决定）；
- *  original_click = 原版PDF·点击翻译（pdfjs 渲染 + 块坐标译文浮层）；
- *  original_bilingual = 原版PDF·左右对照（左 pdfjs 右译文，阶段7-T4）。
- *  注：T6 曾加 original_replace（bbox 原地盖译文层），用户验收观感不佳
- *  已移除（2026-09-09，commit 见阶段7文档），决策专注优化左右对照。 */
+/** readerMode：
+ * parallel = 重排版（bilingual/inline 由 mode 决定）；
+ * original_click = 原版PDF·点击翻译（pdfjs 渲染 + 块坐标译文浮层）；
+ * original_bilingual = 原版PDF·左右对照。
+ * 注：曾加 original_replace（bbox 原地盖译文层），用户验收观感不佳
+ * 已移除，决策专注优化左右对照。 */
 export type ReaderMode = "parallel" | "original_click" | "original_bilingual";
 
-/** 阶段7-T1 全局缩放：0.7–2.0、步进 0.1。阅读偏好（非 API 配置），
- *  按任务约定走 localStorage（`pdf-reader.zoom`），不进 config.json。 */
+/** 全局缩放：0.7–2.0、步进 0.1。阅读偏好（非 API 配置），
+ * 按任务约定走 localStorage（`pdf-reader.zoom`），不进 config.json。 */
 export const ZOOM_MIN = 0.7;
 export const ZOOM_MAX = 2.0;
 export const ZOOM_STEP = 0.1;
-/** 阶段7-T2：各形态「未设置」时的缺省缩放。原版 PDF 固定版式 100% 偏大
- *  （学术双栏尤其如此），初始 70% 可视范围更接近 PDF 阅读器惯例；
- *  重排版是自排文字，100% 为排版基准。用户一旦手动缩放即持久化，
- *  之后全形态以用户值为准（zoom != null）。 */
+/** 各形态「未设置」时的缺省缩放。原版 PDF 固定版式 100% 偏大
+ * （学术双栏尤其如此），初始 70% 可视范围更接近 PDF 阅读器惯例；
+ * 重排版是自排文字，100% 为排版基准。用户一旦手动缩放即持久化，
+ * 之后全形态以用户值为准（zoom != null）。 */
 export const ZOOM_ORIGINAL_DEFAULT = 0.7;
 export const ZOOM_REWRITE_DEFAULT = 1;
 const ZOOM_STORAGE_KEY = "pdf-reader.zoom";
@@ -45,8 +45,8 @@ function persistZoom(z: number): void {
   }
 }
 
-/** 有效缩放值：用户设置过用用户值，未设置按形态回落缺省（阶段7-T2）。
- *  非 parallel 即原版PDF 组（点击翻译/左右对照，缺省同为 70%）。 */
+/** 有效缩放值：用户设置过用用户值，未设置按形态回落缺省。
+ * 非 parallel 即原版PDF 组（点击翻译/左右对照，缺省同为 70%）。 */
 export function effectiveZoom(
   zoom: number | null,
   readerMode: ReaderMode
@@ -87,7 +87,7 @@ export const useUiStore = create<UiState>((set) => ({
       return { zoom: v };
     }),
   // 步进起点：未设置过时从「当前形态缺省」起步（原版 0.7、重排版 1.0），
-  // 保证首次 + 得到 0.8/1.1 而不是从硬编码 1 起跳（阶段7-T2）
+  // 保证首次 + 得到 0.8/1.1 而不是从硬编码 1 起跳
   stepZoom: (delta) =>
     set((s) => {
       const base = s.zoom ?? effectiveZoom(null, s.readerMode);

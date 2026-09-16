@@ -1,4 +1,4 @@
-"""阶段6-T2：持久化文档索引 docs_index 的单元测试。"""
+"""持久化文档索引 docs_index 的单元测试。"""
 
 import json
 import os
@@ -10,7 +10,7 @@ from docs_index import get_doc, index_path, load_index, upsert_doc
 def _doc(doc_id="abcdef0123456789", **kw):
     base = {
         "doc_id": doc_id,
-        "title": "DALK: Knowledge Agent",
+        "title": "DEMO: Knowledge Agent",
         "file_path": r"D:\papers\dalk.pdf",
         "pdf_hash": "abcdef0123456789" + "0" * 24,
         "page_count": 12,

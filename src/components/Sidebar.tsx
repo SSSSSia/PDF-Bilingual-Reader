@@ -6,7 +6,7 @@ import { useUiStore } from "../stores/uiStore";
 import ConfirmDialog from "./common/ConfirmDialog";
 
 /**
- * 侧边栏（2026-09-09 靠岸学术风格一比一复刻）：
+ * 侧边栏：
  * logo / 文献库导航 / 文件夹分组（新建、重命名、删除、计数）/ 底部设置与主题。
  * 窄窗口（<md）由 Layout 的降级顶栏替代，本组件隐藏。
  */
@@ -89,6 +89,7 @@ export default function Sidebar() {
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       {/* logo */}
+
       <div className="px-4 pb-2 pt-5">
         <NavLink to="/" className="flex items-center gap-2.5">
           <span
@@ -104,6 +105,7 @@ export default function Sidebar() {
       </div>
 
       {/* 主导航 */}
+
       <nav className="mt-3 space-y-0.5 px-3">
         <NavLink to="/" end className={({ isActive }) => navCls(isActive)}>
           <svg
@@ -124,6 +126,7 @@ export default function Sidebar() {
       </nav>
 
       {/* 文件夹分组 */}
+
       <div className="mt-6 flex min-h-0 flex-1 flex-col px-3">
         <div className="flex items-center justify-between px-3">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
@@ -151,6 +154,7 @@ export default function Sidebar() {
 
         <div className="mt-1.5 space-y-0.5 overflow-y-auto pb-2">
           {/* 新建输入行 */}
+
           {editing === "new" && (
             <input
               ref={inputRef}
@@ -207,6 +211,7 @@ export default function Sidebar() {
                   </span>
                 </NavLink>
                 {/* hover 操作：重命名 / 删除（覆盖计数位置） */}
+
                 <div className="absolute right-2 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover:flex">
                   <button
                     onClick={() => startRename(f.folder_id, f.name)}
@@ -261,6 +266,7 @@ export default function Sidebar() {
       </div>
 
       {/* 底部：Key 警示 + 设置 + 主题切换 */}
+
       <div className="space-y-0.5 border-t border-slate-200 px-3 py-3 dark:border-slate-700">
         {configLoaded && config && !isConfigured && (
           <div className="mb-1 flex items-center gap-1.5 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
@@ -322,6 +328,7 @@ export default function Sidebar() {
       </div>
 
       {/* 删除文件夹二次确认 */}
+
       <ConfirmDialog
         open={pendingDelete !== null}
         title={`删除文件夹「${pendingDelete?.name ?? ""}」？`}

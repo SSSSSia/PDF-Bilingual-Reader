@@ -35,9 +35,9 @@
     outline-offset: 2px;
   }
 
-  /* 论文阅读排版（用户反馈"要有 PDF 论文的质感"，2026-09-06）：
-     衬线字体栈——英文 Georgia/Times，中文落到宋体系，模拟论文正文字形；
-     配合 text-justify 两端对齐，观感接近 PDF 原版面。 */
+  /* 论文阅读排版：
+     * 衬线字体栈——英文 Georgia/Times，中文落到宋体系，模拟论文正文字形；
+     * 配合 text-justify 两端对齐，观感接近 PDF 原版面。 */
   .paper-font {
     font-family: Georgia, "Times New Roman", "Source Han Serif SC",
       "Noto Serif SC", "STZhongsong", SimSun, serif;
@@ -83,16 +83,16 @@
   background-clip: content-box;
 }
 
-/* ---------- 阶段7-T1 全局缩放：prose 根字号随 --reader-zoom 缩放 ----------
-   内容容器注入 `--reader-zoom`（uiStore.zoom），MarkdownText 的 prose 根
-   挂 .prose-zoomable。选择器用 `.prose.prose-zoomable`（0,2,0）**特异性
-   压过** typography 的 `.prose-sm`/`.sm:prose-base`/`prose-h1:text-xl`
-   （均为 0,1,0）——不依赖源顺序/layer 博弈（首轮实现用单类选择器，
-   实测被 typography 压制导致缩放无视觉效果，2026-09-09 用户反馈）：
-   1) 根字号 = 默认(≤sm) prose-sm 0.875rem / ≥sm prose-base 1rem × 缩放；
-   2) 标题用 em 相对根字号（zoom=1 时与原 prose-h1:text-xl 等数值一致，
-      视觉零变化），正文/行高（em）自然跟随；
-   3) 未注入变量的位置（如原版模式译文浮层）回落 1，浮层保持 chrome 尺寸。 */
+/* ---------- 全局缩放：prose 根字号随 --reader-zoom 缩放 ----------
+   * 内容容器注入 `--reader-zoom`（uiStore.zoom），MarkdownText 的 prose 根
+   * 挂 .prose-zoomable。选择器用 `.prose.prose-zoomable`（0,2,0）**特异性
+   * 压过** typography 的 `.prose-sm`/`.sm:prose-base`/`prose-h1:text-xl`
+   * （均为 0,1,0）——不依赖源顺序/layer 博弈（首轮实现用单类选择器，
+   * 实测被 typography 压制导致缩放无视觉效果，实测反馈）：
+   * 1) 根字号 = 默认(≤sm) prose-sm 0.875rem / ≥sm prose-base 1rem × 缩放；
+   * 2) 标题用 em 相对根字号（zoom=1 时与原 prose-h1:text-xl 等数值一致，
+      * 视觉零变化），正文/行高（em）自然跟随；
+   * 3) 未注入变量的位置（如原版模式译文浮层）回落 1，浮层保持 chrome 尺寸。 */
 .prose.prose-zoomable {
   font-size: calc(0.875rem * var(--reader-zoom, 1));
 }
@@ -159,7 +159,7 @@
   }
 
   /* 下拉框：原生箭头贴右缘且外观不可控——收掉原生外观，自绘 chevron
-     （SVG data-uri 背景右对齐；暗色换浅色箭头），文字留位防截断 */
+     * （SVG data-uri 背景右对齐；暗色换浅色箭头），文字留位防截断 */
   select.input-field {
     @apply appearance-none pr-9;
     background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");

@@ -8,11 +8,11 @@ import { usePdfDocument } from "../hooks/usePdfDocument";
 import LoadingSpinner from "./common/LoadingSpinner";
 
 /**
- * 排版对照页（2026-09-10 验收决策：原版PDF·左右对照 = BabelDOC dual PDF）。
+ * 排版对照页。
  *
- * 取代阶段7-T4 的自绘 overlay 对照（OriginalBilingualPage 退役）——
+ * 取代的自绘 overlay 对照（OriginalBilingualPage 退役）——
  * 「排版完全对齐」直接由 BabelDOC 产物保证：进入本模式**不自动启动**
- * （2026-09-11 用户反馈+实测：与主翻译并发曾把内存榨尽致 WebView2 崩溃
+ * （实测反馈+实测：与主翻译并发曾把内存榨尽致 WebView2 崩溃
  * 重载）——主翻译进行中显示门禁卡（完成后自动放行），空闲时显示确认
  * 卡，点「开始生成」才触发导出；完成后 pdfjs
  * 应用内连续渲染 dual PDF（同页并排英中对照），不再跳系统阅读器。
@@ -42,8 +42,8 @@ export default function DualPdfPage() {
 
   // babeldocStore 是全局单例（同时只记录一个任务的状态）：仅当任务路径与
   // 本页文档一致时才采信，否则一律按 idle 处理——否则切换文档后会把
-  // 上一篇的 dualPath/进度渲染到这一篇（2026-09-12 用户实测：打开 DALK
-  // 的对照，显示的却是 FG-RAG 的论文）
+  // 上一篇的 dualPath/进度渲染到这一篇（实测：打开
+  // 的对照，显示的却是 论文）
   const mine = docPath !== "" && normPath(bdoc.filePath ?? "") === docPath;
   const phase = mine ? bdoc.phase : "idle";
   const progress = mine ? bdoc.progress : 0;
@@ -61,7 +61,7 @@ export default function DualPdfPage() {
   };
 
   // 进入模式（无任务态）时静默探测缓存：命中直接打开，未命中才弹确认卡。
-  // 修复 2026-09-11 回归——应用重启后内存态清空，已生成文档也被要求重新生成，
+  // 修复 回归——应用重启后内存态清空，已生成文档也被要求重新生成，
   // 用户误以为"没保存"。探测以本页文档为准（缓存命中会把任务状态切到本篇）。
   const [probing, setProbing] = useState(false);
   useEffect(() => {
@@ -158,7 +158,7 @@ export default function DualPdfPage() {
 
   if (!dualPath && isLoading && phase === "idle") {
     // 主翻译进行中：门禁——BabelDOC worker 与主翻译并发会内存耗尽
-    // （2026-09-11 实测 RADAR 资源耗尽 + WebView2 崩溃重载）；翻译完成后
+    // ；翻译完成后
     // 本卡自动变为「开始生成」确认卡
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -201,8 +201,8 @@ export default function DualPdfPage() {
   }
 
   if (!dualPath) {
-    // idle：显式确认后才启动（2026-09-11 用户反馈：不要一点模式就自动跑 BabelDOC）。
-    // 别的文档对照任务进行中：排队卡显示该任务的真实进度（T10 反馈 6
+    // idle：显式确认后才启动。
+    // 别的文档对照任务进行中：排队卡显示该任务的真实进度（
     // 改进 2——静态文案读起来像「暂停」，实际在跑且看得到）；同时只运行
     // 一个生成任务（worker 并发 1，内存守卫）
     const busyElsewhere = bdoc.phase === "running" && !mine;

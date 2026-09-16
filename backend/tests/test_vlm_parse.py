@@ -1,4 +1,4 @@
-"""阶段12-T1：VLM 整页结构化解析模块单测。
+"""VLM 整页结构化解析模块单测。
 
 覆盖：纯函数指标（norm/bag_f1）、双栏几何判定、_vlm_call 的成功/空输出/
 HTTP 错误/缺 Key 路径、parse_page 截断对半重发（单栏上下切/双栏左右切）。
@@ -237,11 +237,11 @@ def test_parse_page_mask_regions_forwarded(tmp_path):
     assert seen == [regions, regions, regions]
 
 
-# ── 快照/truth 协同（阶段12-T2）──────────────────────────────────────
+# ── 快照/truth 协同──────────────────────────────────────
 
 
 def _make_figure_pdf(path) -> None:
-    """正文段 + 栅格图（内含标签文字）+ 图注的页面。"""
+    """正文段 + 栅格图（内含标签文字） + 图注的页面。"""
     doc = pymupdf.open()
     page = doc.new_page()
     page.insert_textbox(
@@ -314,7 +314,7 @@ def test_finalize_md_inserts_ref_before_caption(tmp_path):
     assert "Tail paragraph." in out
 
 
-# ── 交叉校验降级（阶段12-T3）────────────────────────────────────────
+# ── 交叉校验降级────────────────────────────────────────
 
 from cache.file_cache import ocr_key, read_cache, write_cache  # noqa: E402
 
@@ -426,7 +426,7 @@ def test_verified_keeps_vlm_when_fallback_also_fails(tmp_path):
         side_effect=IndexError("list index out of range"),
     ):
         # 查全率人为压低触发降级：VLM 输出与 truth 无重叠字符的假场景
-        # （T10 反馈 5：判定改为查全率/精确率双阈值，bag 仅作统计观测）
+        # （判定改为查全率/精确率双阈值，bag 仅作统计观测）
         with patch(
             "ocr.vlm_parse.verify_recall_precision", return_value=(0.1, 1.0)
         ), patch("ocr.vlm_parse.verify_bag", return_value=0.1):
@@ -481,11 +481,11 @@ def test_verified_short_truth_accepts_vlm(tmp_path):
     assert out["source"] == "vlm"
 
 
-# ── 顺序几何兜底与噪音覆盖（阶段12-T5）──────────────────────────────
+# ── 顺序几何兜底与噪音覆盖──────────────────────────────
 
 
 def test_finalize_md_repairs_column_swap(tmp_path):
-    """VLM 整栏交换（DALK p2 反例形态）→ 高置信双栏页几何重排纠正。"""
+    """VLM 整栏交换（形态）→ 高置信双栏页几何重排纠正。"""
     pdf = str(tmp_path / "two.pdf")
     _make_pdf(pdf, two_col=True)
     prep = vlm_parse._prepare(pdf, 0, None)
@@ -511,7 +511,7 @@ def test_finalize_md_leaves_unmatched_order_alone(tmp_path):
 
 
 def test_vlm_noise_blocks_filtered_downstream():
-    """VLM 输出残留的页码/页眉/页脚行由 split_into_blocks 过滤（T5 验证覆盖）。"""
+    """VLM 输出残留的页码/页眉/页脚行由 split_into_blocks 过滤（验证覆盖）。"""
     from ocr.siliconflow import split_into_blocks
 
     md = (
@@ -522,12 +522,12 @@ def test_vlm_noise_blocks_filtered_downstream():
     assert parts == ["# 3 Method", "The encoder maps inputs to outputs."]
 
 
-# ── 查全率/精确率双阈值（阶段12-T10 反馈 5，2026-09-15）──────────────
+# ── 查全率/精确率双阈值──────────────
 
 def test_verify_recall_precision_admits_latex_dilution():
     """数学页误杀根因：LaTeX 命令字母膨胀 VLM 侧字符、真值侧 Unicode 数学
     符被口径剥空——F1 <0.90 但查全率≈1（内容零丢失）。双阈值下应通过。
-    配比取自实测（SubgraphRAG p4：F1 0.895 / recall 0.9994 / precision
+    配比取自实测（F1 0.895 / recall 0.9994 / precision
     0.811）：每 55 个正文 alnum 字符配 3 个数学符（真值侧剥空），
     LaTeX 表示新增 ~12 个命令字母。"""
     prose = "the probability estimate of the query answer satisfies the bound "
@@ -559,7 +559,7 @@ def test_verify_recall_precision_rejects_hallucination():
 
 def test_verified_degenerate_output_retried_once(tmp_path):
     """退化输出（hosted 偶发只回页码）：字母数字 <10% 真值 → 重试一次，
-    第二次正常输出被采纳（SubgraphRAG p7 实测整页只返回 '7'）。"""
+    第二次正常输出被采纳（整页只返回 '7'）。"""
     # 真值需 ≥200 alnum 字符才触发退化判定（防短页误重试）
     body = " ".join(
         f"Long body paragraph number {i} keeps enough prose characters."

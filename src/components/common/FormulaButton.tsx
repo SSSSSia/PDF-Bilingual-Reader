@@ -5,15 +5,15 @@ import { recognizeBlockFormula, translateBlock } from "../../lib/bridge";
 import type { TextBlock } from "../../types";
 
 /**
- * 公式块按需识别按钮（2026-09-08 用户决策；混合块链路 2026-09-08 二次迭代）：
+ * 公式块按需识别按钮：
  * 公式密集块（formula_hint）悬停显示「式」，点击把块区域（多段块逐段）
  * 裁剪送视觉模型（PaddleOCR-VL）转 LaTeX/markdown。
  *
  * 两类结果：
  * - 纯公式块（is_formula_block）：识别结果（LaTeX）直接替换译文位，KaTeX 渲染；
  * - 数学密集混合块（math_mixed）：识别结果是「英文正文 + $..$ 行内公式」的
- *   干净 markdown——替换原文（原文栏同时变干净）后自动调单块翻译
- *   （后端 protect_formulas 会保护 $..$ 段），译文 = 中文正文 + 渲染公式。
+ * 干净 markdown——替换原文（原文栏同时变干净）后自动调单块翻译
+ * （后端 protect_formulas 会保护 $..$ 段），译文 = 中文正文 + 渲染公式。
  *
  * 后端按 (pdf_hash,page,bbox,model) 缓存识别结果，重复点按/重开文档幂等零成本。
  */
@@ -114,7 +114,8 @@ export default function FormulaButton({ block }: { block: TextBlock }) {
       >
         {label}
       </button>
-      {/* 失败原因内联展示（2026-09-08 用户反馈：报错但看不到原因） */}
+      {/* 失败原因内联展示 */}
+
       {state === "err" && errMsg && (
         <span
           role="alert"

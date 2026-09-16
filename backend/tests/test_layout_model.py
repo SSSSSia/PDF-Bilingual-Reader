@@ -1,10 +1,10 @@
-"""阶段12-T9.1：版面检测信号源接入层单测。
+"""版面检测信号源接入层单测。
 
 不真起 babeldoc 运行时——LayoutProvider._spawn 按模块惯例注入 FakeProc
 （stdout NDJSON 可编程），覆盖：缓存命中短路、正常流式收尾、worker 错误、
 提前退出、静默超时、运行时缺失、未请求页 None。
 worker 脚本（layout_worker.py）的真实推理由 backend/tools/layout_model_quality.py
-在随包运行时上回归（T9.5），不进 pytest。
+在随包运行时上回归，不进 pytest。
 """
 import asyncio
 import json
@@ -211,7 +211,7 @@ def test_regions_unrequested_page_is_none(tmp_path, monkeypatch):
     assert r is None
 
 
-# ── T9.3 区域去重（纯几何）───────────────────────────────────────
+# ── 区域去重（纯几何）───────────────────────────────────────
 
 from ocr.layout_model import dedupe_regions  # noqa: E402
 
@@ -226,7 +226,7 @@ def test_dedupe_conf_floor_boundary():
 
 
 def test_dedupe_fg_rag_p3_measured_case():
-    """实测回归（2026-09-14 worker 冒烟）：第三张无框表 0.56 与复检框
+    """实测回归：第三张无框表 0.56 与复检框
     0.38 同 bbox——0.56 保留（验收标准 1），0.38 双重死亡（下限+IoU）。"""
     regions = [
         {"label": "table", "conf": 0.92, "bbox": [318, 317, 557, 375]},
@@ -276,7 +276,7 @@ def test_dedupe_output_sorted_by_yx_and_robust_to_malformed():
 
 
 def test_provider_regions_applies_dedupe(tmp_path, monkeypatch):
-    """读取口去重：worker 原始产出（含复检框/低置信框）→ regions() 已净化。"""
+    """读取口去重：worker 原始产出（含复检框/低置信框）→ regions 已净化。"""
     proc = _FakeProc(_FakeStream([
         _ndline({"page": 0, "regions": [
             {"label": "table", "conf": 0.92, "bbox": [55, 292, 365, 395]},

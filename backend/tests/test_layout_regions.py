@@ -1,4 +1,4 @@
-"""阶段12-T9.2：版面模型区域消费单测（纯函数 + _prepare/_finalize 集成）。
+"""版面模型区域消费单测（纯函数 + _prepare/_finalize 集成）。
 
 区域分类、标题编号定级、abandon 三通道匹配（全等/首窗口前缀/截断片段）、
 title 提升的幂等与长度约束；_prepare 的 truth 扣除与无框表快照补位、
@@ -20,7 +20,7 @@ def test_split_layout_regions_classifies_and_drops_malformed():
         {"label": "figure", "conf": 0.8, "bbox": [10, 120, 200, 200]},
         {"label": "abandon", "conf": 0.85, "bbox": [0, 700, 600, 780]},
         {"label": "title", "conf": 0.92, "bbox": [40, 40, 500, 90]},
-        {"label": "plain text", "conf": 0.99, "bbox": [0, 0, 100, 100]},  # 正文区域（T10：栏判定信号）
+        {"label": "plain text", "conf": 0.99, "bbox": [0, 0, 100, 100]},  # 正文区域（栏判定信号）
         {"label": "title", "conf": 0.5, "bbox": [1, 1]},                  # 畸形 bbox
         {"label": "abandon", "conf": 0.7, "bbox": None},                  # 畸形 bbox
         {"label": "figure", "conf": 0.7, "bbox": [5, 5, 5, 5]},           # 空矩形
@@ -103,7 +103,7 @@ def test_promote_titles_levels_and_idempotent():
 
 
 def test_promote_titles_runin_split():
-    """run-in 拆分（FG-RAG p1 实测形态）：VLM 把标题行与正文粘成一段，
+    """run-in 拆分：VLM 把标题行与正文粘成一段，
     段落前缀与标题区域文本逐字符对齐 → 拆成标题段 + 余文段。"""
     titles = [
         (_md_norm("Abstract"), "Abstract", 2),
@@ -209,7 +209,7 @@ def test_finalize_md_drops_abandon_and_promotes_title(tmp_path):
 
 
 def test_finalize_md_without_layout_keeps_behavior(tmp_path):
-    """无版面信号（T9.4 兜底激活）：字号证据登场——本合成 PDF 全文同字号
+    """无版面信号（兜底激活）：字号证据登场——本合成 PDF 全文同字号
     同字重，证据为空 → 输出不变（兜底无害性的下界）。"""
     pdf = str(tmp_path / "l.pdf")
     _make_layout_pdf(pdf)
@@ -242,7 +242,7 @@ def _make_font_pdf(path) -> None:
 
 
 def test_font_evidence_fallback_promotes_title(tmp_path):
-    """T9.4：版面信号缺席 → 字号证据把粗体大字标题提升为 #。"""
+    """版面信号缺席 → 字号证据把粗体大字标题提升为 #。"""
     pdf = str(tmp_path / "f.pdf")
     _make_font_pdf(pdf)
     prep = vlm_parse._prepare(pdf, 0, str(tmp_path / "img"), None)
@@ -257,7 +257,7 @@ def test_font_evidence_fallback_promotes_title(tmp_path):
 
 
 def test_layout_ok_suppresses_font_fallback(tmp_path):
-    """T9.4 关键语义：版面模型成功出区域（即使本页无 title）→ 字号证据
+    """关键语义：版面模型成功出区域（即使本页无 title）→ 字号证据
     不越权——「本页无标题」是版面模型的可信判定。"""
     pdf = str(tmp_path / "f.pdf")
     _make_font_pdf(pdf)
@@ -274,7 +274,7 @@ def test_layout_ok_suppresses_font_fallback(tmp_path):
 # ── parse_page_verified：遮罩含 abandon 区域 ─────────────────────
 
 class _FakeLayout:
-    """regions() 返回固定区域（模拟 provider 页级产出）。"""
+    """regions 返回固定区域（模拟 provider 页级产出）。"""
 
     def __init__(self, regions):
         self._regions = regions
@@ -310,7 +310,7 @@ def test_parse_page_verified_mask_includes_abandon(tmp_path, monkeypatch):
 
     res = asyncio.run(run())
     assert res["source"] == "vlm"
-    # 遮罩 = 快照区域（无框表）+ abandon 区域（版权段）
+    # 遮罩 = 快照区域（无框表） + abandon 区域（版权段）
     rects = [pymupdf.Rect(r) for r in captured["mask"]]
     assert any(r.y0 > 600 for r in rects)                      # abandon（页脚带）
     assert any(250 < r.y0 < 400 for r in rects)                # 表格快照
