@@ -17,7 +17,7 @@
 
 > 设计目标：**个人本地使用 + 开源可复刻**。配置一次 API Key 即可开箱阅读；他人 clone 后按本文档即可跑起来。
 >
-> 🇨🇳 国内访问：仓库同步托管于 [Gitee 镜像](https://gitee.com/sssssia/pdf-reader)；安装包体积较大，请到 [GitHub Releases](https://github.com/SSSSSia/PDF-Reader/releases) 下载。
+> 🇨🇳 国内访问：仓库同步托管于 [Gitee 镜像](https://gitee.com/sssssia/pdf-bilingual-reader)；安装包体积较大，请到 [GitHub Releases](https://github.com/SSSSSia/PDF-Bilingual-Reader/releases) 下载。
 
 ---
 
@@ -114,7 +114,7 @@ Rust 壳 (src-tauri) ── reqwest ──► FastAPI 后端 (127.0.0.1:8000)
 
 ## 安装即用（推荐普通用户）
 
-到 [Releases](https://github.com/SSSSSia/PDF-Reader/releases) 下载安装包（MSI 或 NSIS exe，x64），安装后：
+到 [Releases](https://github.com/SSSSSia/PDF-Bilingual-Reader/releases) 下载安装包（MSI 或 NSIS exe，x64），安装后：
 
 1. 打开 设置 → 填入 SiliconFlow API Key
 
@@ -383,7 +383,7 @@ npx vite build
 ## 项目结构
 
 ```
-PDF-Reader/
+PDF-Bilingual-Reader/
 ├── src/                        # React 前端
 │   ├── components/
 │   │   ├── MainPage.tsx        # 首页：选文件/拖拽上传 + 缩略图
