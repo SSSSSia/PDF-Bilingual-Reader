@@ -182,6 +182,22 @@ export async function openDoc(docId: string): Promise<OpenDocResult> {
   }) as Promise<OpenDocResult>;
 }
 
+/**
+ * BabelDOC 上传模式入库：源 PDF 复制进文献库 + 登记（reader=babeldoc），
+ * 返回库内路径与 doc_id。不启动自研翻译管线；对照生成随后经
+ * babeldocStore.start 发起，完成由后端钩子回写 status=done。
+ */
+export async function importToLibrary(
+  filePath: string,
+  title: string
+): Promise<{ path: string; doc_id: string }> {
+  return apiFetch(`${API_BASE}/api/library/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_path: filePath, title }),
+  }) as Promise<{ path: string; doc_id: string }>;
+}
+
 /* ---------------- BabelDOC 双语 PDF 导出 ---------------- */
 
 export interface BabelDocJob {

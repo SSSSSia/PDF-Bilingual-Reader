@@ -12,6 +12,8 @@ import {
   EXTRACT_DONE,
 } from "../lib/translationManager";
 import ConfirmDialog from "./common/ConfirmDialog";
+import UploadModeToggle from "./common/UploadModeToggle";
+import { startBabeldocUpload, openBabeldocDoc } from "../lib/babeldocUpload";
 import {
   openFileDialog,
   uploadFile,
@@ -174,6 +176,22 @@ export default function MainPage() {
       return;
     }
     const fileName = selected.split(/[\\/]/).pop() || selected;
+    // BabelDOC 上传模式：不走自研管线，入库后直接对照生成（完成就地渲染）
+    if (useUiStore.getState().uploadMode === "babeldoc") {
+      // 生成器与主翻译并发是内存耗尽风险（DualPdfPage 门禁同口径）
+      if (currentTranslationKey()) {
+        setError("已有翻译任务进行中，BabelDOC 对照需等待其完成后再添加");
+        return;
+      }
+      navigatedRef.current = true; // 不走 pages 就绪 effect（该 effect 只服务重排版管线）
+      const err = await startBabeldocUpload(selected, fileName);
+      if (err) {
+        setError(err);
+        return;
+      }
+      navigate("/reader/bilingual");
+      return;
+    }
     // 不 await 轮询完成：跳转仍由上方 pages 就绪 effect 驱动；
     // 轮询在 translationManager 后台进行，MainPage 卸载不受影响。
     navigatedRef.current = false;
@@ -221,6 +239,18 @@ export default function MainPage() {
   ) => {
     if (openingId) return;
     const sessions = useSessionsStore.getState();
+    // BabelDOC 上传模式文档：无自研管线缓存，不走 openDoc 重建；
+    // 对照视图打开（缓存命中秒开，任务丢失由生成页确认卡兜底重生成）
+    if (doc.reader === "babeldoc") {
+      if (!doc.file_exists) {
+        setError("源 PDF 已不在库内，无法打开对照视图");
+        return;
+      }
+      openBabeldocDoc(doc.file_path, doc.doc_id, doc.title);
+      navigatedRef.current = true;
+      navigate("/reader/bilingual");
+      return;
+    }
     // 已是该活跃会话（或内存中装的就是这一篇但未登记）→ 直接回阅读页
     if (usePdfStore.getState().sessionKey === doc.doc_id) {
       navigatedRef.current = true;
@@ -351,23 +381,26 @@ export default function MainPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           {currentFolder ? currentFolder.name : "文献库"}
         </h1>
-        <button
-          onClick={() => navigate("/add")}
-          className="btn-primary inline-flex items-center gap-1.5"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            className="h-4 w-4"
-            aria-hidden="true"
+        <div className="flex items-center gap-3">
+          <UploadModeToggle />
+          <button
+            onClick={() => navigate("/add")}
+            className="btn-primary inline-flex items-center gap-1.5"
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          添加文章
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            添加文章
+          </button>
+        </div>
       </header>
 
       {/* 空状态：整块拖拽上传区作主视觉（入口不丢弃）；文件夹不存在单独提示 */}
@@ -609,7 +642,9 @@ export default function MainPage() {
                     </p>
                   )}
                   <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                    {d.translated_at} · {d.page_count} 页
+                    {d.reader === "babeldoc" && d.status !== "done"
+                      ? "对照生成中…"
+                      : `${d.translated_at}${d.page_count ? ` · ${d.page_count} 页` : ""}`}
                   </p>
                 </div>
               </div>

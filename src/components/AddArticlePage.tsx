@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { startTranslation } from "../lib/translationManager";
+import { startTranslation, currentTranslationKey } from "../lib/translationManager";
+import { startBabeldocUpload } from "../lib/babeldocUpload";
 import { useConfigStore } from "../stores/configStore";
+import { useUiStore } from "../stores/uiStore";
+import UploadModeToggle from "./common/UploadModeToggle";
 import { openFileDialog, uploadFile, isTauri } from "../lib/bridge";
 
 /**
@@ -15,8 +18,8 @@ export default function AddArticlePage() {
   const [isDragging, setIsDragging] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  // 交给 translationManager 启动后台翻译：成功 → 返回文档库看进度；
-  // 失败（如已有任务进行中）→ 留在本页提示原因。
+  // 按当前选中的翻译模式分流：BabelDOC 模式入库后直接对照生成；
+  // 重排版模式交给 translationManager 后台翻译（成功回文档库看进度）。
   // 无 Key 前置拦截：未配置直接提示并引导去设置，不发无效任务
   const handleFile = async (path: string) => {
     const { configLoaded, isConfigured } = useConfigStore.getState();
@@ -25,6 +28,20 @@ export default function AddArticlePage() {
       return;
     }
     const fileName = path.split(/[\\/]/).pop() || path;
+    if (useUiStore.getState().uploadMode === "babeldoc") {
+      // 生成器与主翻译并发是内存耗尽风险（DualPdfPage 门禁同口径）
+      if (currentTranslationKey()) {
+        setLocalError("已有翻译任务进行中，BabelDOC 对照需等待其完成后再添加");
+        return;
+      }
+      const err = await startBabeldocUpload(path, fileName);
+      if (err) {
+        setLocalError(err);
+        return;
+      }
+      navigate("/reader/bilingual");
+      return;
+    }
     const r = await startTranslation(path, fileName);
     if (r.ok) {
       navigate("/");
@@ -121,6 +138,10 @@ export default function AddArticlePage() {
           </svg>
           上传本地文件
         </p>
+
+        <div className="mt-3 flex justify-end">
+          <UploadModeToggle />
+        </div>
 
         <div
           role="button"

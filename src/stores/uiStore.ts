@@ -21,6 +21,32 @@ export const ZOOM_ORIGINAL_DEFAULT = 0.7;
 export const ZOOM_REWRITE_DEFAULT = 1;
 const ZOOM_STORAGE_KEY = "pdf-reader.zoom";
 
+/** 上传翻译模式：typeset = 自研重排版管线（默认，功能全）；
+ * babeldoc = BabelDOC 对照直出（原版排版、质量更稳，仅英→中，
+ * 无重排版/点击翻译/Markdown 导出）。按任务约定走 localStorage
+ * （`pdf-reader.uploadMode`），不进 config.json。 */
+export type UploadMode = "typeset" | "babeldoc";
+const UPLOAD_MODE_STORAGE_KEY = "pdf-reader.uploadMode";
+
+function loadUploadMode(): UploadMode {
+  try {
+    return localStorage.getItem(UPLOAD_MODE_STORAGE_KEY) === "babeldoc"
+      ? "babeldoc"
+      : "typeset";
+  } catch {
+    /* localStorage 不可用 → 默认重排版 */
+    return "typeset";
+  }
+}
+
+function persistUploadMode(m: UploadMode): void {
+  try {
+    localStorage.setItem(UPLOAD_MODE_STORAGE_KEY, m);
+  } catch {
+    /* 持久化失败不影响本会话 */
+  }
+}
+
 function clampZoom(z: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 10) / 10));
 }
@@ -63,6 +89,8 @@ interface UiState {
   readerMode: ReaderMode;
   /** null = 用户未手动设置过（渲染方按 effectiveZoom 回落形态缺省） */
   zoom: number | null;
+  /** 下一次上传使用的翻译模式（记住上次选择） */
+  uploadMode: UploadMode;
   setMode: (mode: "bilingual" | "inline") => void;
   setTheme: (theme: "light" | "dark") => void;
   setReaderMode: (m: ReaderMode) => void;
@@ -70,6 +98,7 @@ interface UiState {
   stepZoom: (delta: number) => void;
   resetZoom: () => void;
   toggleTheme: () => void;
+  setUploadMode: (m: UploadMode) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -77,9 +106,15 @@ export const useUiStore = create<UiState>((set) => ({
   theme: "light",
   readerMode: "parallel",
   zoom: loadZoom(),
+  uploadMode: loadUploadMode(),
   setMode: (mode) => set({ mode }),
   setTheme: (theme) => set({ theme }),
   setReaderMode: (readerMode) => set({ readerMode }),
+  setUploadMode: (uploadMode) =>
+    set(() => {
+      persistUploadMode(uploadMode);
+      return { uploadMode };
+    }),
   setZoom: (z) =>
     set(() => {
       const v = clampZoom(z);

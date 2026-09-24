@@ -158,7 +158,31 @@ async def cancel(job_id: str) -> bool:
     return True
 
 
-async def start_export(file_path: str, translate_config: dict, cache_dir: str) -> dict:
+def _finish_register(job: dict) -> None:
+    """BabelDOC 上传模式的完成登记：该文档经 /api/library/import 以
+    reader=babeldoc + status=translating 入库，生成完成在此置 done，
+    文献卡随之可开（双保险：缓存命中路径同样调用）。普通导出（索引无
+    reader 标记或无记录）不动索引——导出不该改写既有文献的状态。"""
+    try:
+        data_dir = job.get("_data_dir") or ""
+        doc_id = (job.get("pdf_hash") or "")[:16]
+        if not data_dir or not doc_id:
+            return
+        import docs_index
+
+        doc = docs_index.get_doc(data_dir, doc_id)
+        if doc and doc.get("reader") == "babeldoc":
+            # upsert 是整条替换（仅 folder_id/translated_at 特判保留），
+            # 必须传全量记录，只改 status
+            docs_index.upsert_doc(data_dir, {**doc, "status": "done"})
+            logger.info("BabelDOC 上传模式完成登记 doc_id=%s", doc_id)
+    except Exception:  # noqa: BLE001 — 登记失败不影响导出结果本身
+        logger.exception("BabelDOC 完成登记失败 job_id=%s", job.get("job_id"))
+
+
+async def start_export(
+    file_path: str, translate_config: dict, cache_dir: str, data_dir: str = ""
+) -> dict:
     """启动（或命中缓存/幂等复用）一个 BabelDOC 导出任务。失败抛 ValueError/FAQ。"""
     file_path = (file_path or "").strip()
     if not file_path or not os.path.isfile(file_path):
@@ -204,9 +228,11 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
             "mono_path": _find_cached_mono(out_dir),
             "created_at": time.time(),
             "finished_at": time.time(),
+            "_data_dir": data_dir,
         }
         _jobs[job_id] = job
         logger.info("BabelDOC 缓存命中 file=%s model=%s", os.path.basename(file_path), model)
+        _finish_register(job)
         return _public(job)
 
     # 幂等：同一 (pdf_hash, model) 已有进行中任务则直接复用
@@ -245,6 +271,7 @@ async def start_export(file_path: str, translate_config: dict, cache_dir: str) -
         "log_path": os.path.join(out_dir, "worker.log"),
         "created_at": time.time(),
         "finished_at": None,
+        "_data_dir": data_dir,
     }
     _jobs[job_id] = job
 
@@ -340,6 +367,7 @@ async def _pump(job: dict, proc: subprocess.Popen) -> None:
                 job["mono_path"] = str(event.get("mono") or "")
                 job["finished_at"] = time.time()
                 logger.info("BabelDOC 导出完成 job_id=%s dual=%s", job_id, job["dual_path"])
+                _finish_register(job)
             elif etype == "error":
                 job["status"] = "error"
                 job["message"] = str(event.get("error") or "未知错误")

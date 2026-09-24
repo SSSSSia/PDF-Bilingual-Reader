@@ -602,6 +602,62 @@ async def api_upload(file: UploadFile = File(...)):
     return {"path": dest}
 
 
+@app.post("/api/library/import")
+async def api_library_import(payload: dict):
+    """BabelDOC 上传模式入库：源 PDF 复制进文献库 + 登记索引（reader=babeldoc）。
+
+    不启动自研翻译管线——该模式只跑 BabelDOC 对照生成（解析与翻译全由
+    BabelDOC 独立完成，不复用也不产出应用翻译缓存）。status 从 translating
+    起，生成完成由 babeldoc_export 完成钩子置 done，前端无需回写。
+    同内容重复上传按内容哈希去重，登记幂等。"""
+    import docs_index
+    from library import materialize
+
+    fp = str(payload.get("file_path") or "")
+    if not os.path.isfile(fp):
+        raise HTTPException(
+            status_code=400,
+            detail="源文件不存在（可能已被移动、改名或删除）。请重新选择该 PDF。",
+        )
+    try:
+        fp = materialize(fp, settings.data_dir)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"入库失败：{e}")
+    from cache.file_cache import file_hash
+
+    pdf_hash = await asyncio.to_thread(file_hash, fp)
+    # 页数直接读源 PDF：该模式不走 /api/docs/open 自愈路径，页数必须在
+    # 入库时就落档，否则文献卡会一直显示缺页数
+    page_count = 0
+    try:
+        import pymupdf
+
+        with pymupdf.open(fp) as pdf:
+            page_count = len(pdf)
+    except Exception:
+        logger.warning("入库读取页数失败 file=%s", fp, exc_info=True)
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        title = os.path.splitext(os.path.basename(fp))[0]
+    # upsert 是整条替换：带旧记录字段（page_count 等）以免丢失
+    old = docs_index.get_doc(settings.data_dir, pdf_hash[:16]) or {}
+    docs_index.upsert_doc(
+        settings.data_dir,
+        {
+            **old,
+            "doc_id": pdf_hash[:16],
+            "title": title,
+            "file_path": fp,
+            "pdf_hash": pdf_hash,
+            "file_mtime": int(os.path.getmtime(fp)),
+            "page_count": page_count,
+            "status": "translating",
+            "reader": "babeldoc",
+        },
+    )
+    return {"path": fp, "doc_id": pdf_hash[:16]}
+
+
 @app.get("/api/file/raw")
 async def api_file_raw(path: str):
     """dev 桥接模式：返回文件原始字节（缩略图用 pdfjs 通过 URL 读取；
@@ -637,6 +693,7 @@ async def api_export_babeldoc(payload: dict):
             str(payload.get("file_path") or ""),
             settings.translate_config,
             settings.cache_dir,
+            settings.data_dir,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -85,6 +85,9 @@ export interface DocMeta {
   file_exists?: boolean;
   /** 归档文件夹（null/缺省 = 未分类；侧边栏文件夹分组用） */
   folder_id?: string | null;
+  /** 阅读器标记：babeldoc = 上传即对照模式（无自研管线缓存，
+   * 打开直接进 BabelDOC 对照视图，跳过 openDoc 快照重建） */
+  reader?: "babeldoc";
 }
 
 /** 文件夹：侧边栏分组，folders.json 持久化 */
