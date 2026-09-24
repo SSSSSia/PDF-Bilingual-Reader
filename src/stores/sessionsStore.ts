@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { usePdfStore } from "./pdfStore";
+import { EXTRACT_DONE } from "../lib/constants";
 import type { PageResult, PipelineResult } from "../types";
 
 /**
@@ -150,14 +151,25 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       remove(key);
       return activeKey;
     }
-    // 关闭的是活跃会话：激活最近使用的其他会话
-    const next = [...rest].sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    // 关闭的是活跃会话：激活最近使用的其他会话。提取未完成（排版未定型）
+    // 的翻译中会话不许自动换入阅读视图（与进度卡点击/标题栏 tab 同一口径）——
+    // 否则关闭当前文献会被自动跳进只有残缺页的翻译中文档；无合格者回文献库。
+    const next = [...rest]
+      .filter(
+        (s) =>
+          !(
+            s.kind === "job" &&
+            s.job?.status === "running" &&
+            (s.job?.progress ?? 0) < EXTRACT_DONE
+          ),
+      )
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
     remove(key);
     if (next) {
       get().activate(next.key);
       return next.key;
     }
-    usePdfStore.getState().reset(); // 全部关闭：清空并回文献库
+    usePdfStore.getState().reset(); // 无可激活会话：清空并回文献库
     return null;
   },
 
