@@ -386,7 +386,8 @@ export default function MainPage() {
           {currentFolder ? currentFolder.name : "文献库"}
         </h1>
         <div className="flex items-center gap-3">
-          <UploadModeToggle compact />
+          {/* 空状态已有整版模式卡（拖拽区上方），页头切换仅非空状态显示 */}
+          {!(loaded && !folderId && !hasDocs) && <UploadModeToggle compact />}
           <button
             onClick={() => navigate("/add")}
             className="btn-primary inline-flex items-center gap-1.5"
