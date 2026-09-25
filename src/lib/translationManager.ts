@@ -27,9 +27,23 @@ export { EXTRACT_DONE } from "./constants";
 
 let runningKey: string | null = null;
 
+/** 被放弃的任务 key（文献删除联动）：poll 循环见之即退出，
+ * 不再写会话/镜像 pdfStore（后端取消由 API 负责，此处只管前端静默） */
+const abandoned = new Set<string>();
+
 /** 当前进行中的翻译会话 key（文献库进度卡/页签用） */
 export function currentTranslationKey(): string | null {
   return runningKey;
+}
+
+/**
+ * 放弃跟踪翻译任务（删除文献时调用）：轮询下轮退出、runningKey 复位；
+ * 会话移除由调用方 close 完成（页签/进度卡随会话消失）。
+ * 后端任务取消经 cancelPipeline 另行请求，二者失败互不阻塞。
+ */
+export function abandonTranslation(jobKey: string): void {
+  if (runningKey === jobKey) runningKey = null;
+  abandoned.add(jobKey);
 }
 
 /** pages 渐进签名 */
@@ -253,6 +267,10 @@ async function poll(key: string, filePath: string): Promise<void> {
   let errorCount = 0;
 
   while (Date.now() < deadline) {
+    if (abandoned.has(key)) {
+      abandoned.delete(key);
+      return;
+    }
     let status: PipelineResult;
     try {
       const statusStr = (await getPipelineStatus(key)) as string;

@@ -9,6 +9,7 @@ import {
   startTranslation,
   attach,
   currentTranslationKey,
+  abandonTranslation,
   EXTRACT_DONE,
 } from "../lib/translationManager";
 import ConfirmDialog from "./common/ConfirmDialog";
@@ -20,6 +21,7 @@ import {
   openDoc,
   listRunningTranslations,
   renameDoc,
+  cancelPipeline,
 } from "../lib/bridge";
 import { useDocThumbnails } from "../hooks/useDocThumbnails";
 import type { DocMeta } from "../types";
@@ -175,8 +177,23 @@ export default function MainPage() {
       return;
     }
     const fileName = selected.split(/[\\/]/).pop() || selected;
-    // 主页快捷上传固定走重排版管线；「BabelDOC 对照」模式仅由添加文章页
-    // 的模式选择卡触发（选择属于上传流程的一部分，不在主页常驻）
+    // 跟随添加页选定的翻译模式（localStorage 记忆）：BabelDOC 对照
+    // 不走自研管线，入库后直接对照生成（完成就地渲染）
+    if (useUiStore.getState().uploadMode === "babeldoc") {
+      // 生成器与主翻译并发是内存耗尽风险（DualPdfPage 门禁同口径）
+      if (currentTranslationKey()) {
+        setError("已有翻译任务进行中，BabelDOC 对照需等待其完成后再添加");
+        return;
+      }
+      navigatedRef.current = true; // 不走 pages 就绪 effect（该 effect 只服务重排版管线）
+      const err = await startBabeldocUpload(selected, fileName);
+      if (err) {
+        setError(err);
+        return;
+      }
+      navigate("/reader/bilingual");
+      return;
+    }
     // 不 await 轮询完成：跳转仍由上方 pages 就绪 effect 驱动；
     // 轮询在 translationManager 后台进行，MainPage 卸载不受影响。
     navigatedRef.current = false;
@@ -910,10 +927,27 @@ export default function MainPage() {
         onConfirm={() => {
           const d = deletingDoc;
           setDeletingDoc(null);
-          if (d)
-            void deleteDoc(d.doc_id).catch((e) =>
-              setError(e instanceof Error ? e.message : String(e)),
+          if (!d) return;
+          // 联动取消进行中的翻译任务：页签/进度卡随会话移除，后端在
+          // 页边界停机且不回写索引（否则任务完成后已删文献会重新出现）
+          const jobSess = useSessionsStore
+            .getState()
+            .sessions.find(
+              (s) =>
+                s.kind === "job" &&
+                s.key.startsWith(d.doc_id) &&
+                s.job?.status === "running",
             );
+          if (jobSess) {
+            cancelPipeline(jobSess.key).catch(() => {
+              /* 取消失败不阻塞删除：后端最多跑完这次任务（缓存照常） */
+            });
+            abandonTranslation(jobSess.key);
+            useSessionsStore.getState().close(jobSess.key);
+          }
+          void deleteDoc(d.doc_id).catch((e) =>
+            setError(e instanceof Error ? e.message : String(e)),
+          );
         }}
         onCancel={() => setDeletingDoc(null)}
       />

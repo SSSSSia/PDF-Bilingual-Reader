@@ -183,6 +183,18 @@ export async function openDoc(docId: string): Promise<OpenDocResult> {
 }
 
 /**
+ * 取消进行中的翻译任务（删除文献联动）：后端在页/阶段边界停机，
+ * 不再把已删除的文献回写文献索引。任务不存在/已结束返回 ok=false。
+ */
+export async function cancelPipeline(jobId: string): Promise<{ ok: boolean }> {
+  return apiFetch(`${API_BASE}/api/pipeline/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: jobId }),
+  }) as Promise<{ ok: boolean }>;
+}
+
+/**
  * BabelDOC 上传模式入库：源 PDF 复制进文献库 + 登记（reader=babeldoc），
  * 返回库内路径与 doc_id。不启动自研翻译管线；对照生成随后经
  * babeldocStore.start 发起，完成由后端钩子回写 status=done。

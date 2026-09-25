@@ -244,6 +244,20 @@ async def run_pipeline(file_path: str, display_name: str | None = None) -> dict:
     }
 
 
+def cancel_job(job_id: str) -> bool:
+    """请求取消进行中的翻译任务（删除文献联动）。
+
+    协作式取消：只置标记，_process_pipeline 在页边界/阶段边界检查后停机，
+    任务标记为 failed（error=已取消）且**不回写文献索引**——已删除的
+    文献不会在任务完成后重新出现在文献库。进行中的单页/单块自然结束。
+    """
+    job = _jobs.get(job_id)
+    if not job or job["status"] != "running" or job.get("_cancel"):
+        return False
+    job["_cancel"] = True
+    return True
+
+
 def _split_page(page: dict) -> dict:
     """将一页 OCR 结果（整页 markdown 单个 block）切成段/句级多个 block。"""
     src_blocks = page.get("blocks", [])
@@ -536,6 +550,10 @@ async def _load_or_run_ocr(file_path: str, pdf_hash: str, config: dict, job: dic
     vlm_todo: list[int] = []
 
     for i in range(total_pages):
+        if job.get("_cancel"):
+            job["status"] = "failed"
+            job["error"] = "已取消（文献已删除）"
+            return
         # 最终产物缓存命中 → 直接挂载（VLM/降级来源随缓存记录，供 stats）
         cached = read_cache(cache_dir, ocr_key(pdf_hash, i, TEXT_LAYER_MODEL))
         if cached and cached.get("blocks"):
@@ -720,6 +738,10 @@ async def _process_pipeline(
         job["progress"] = 30
 
         # ---- 阶段 2：翻译（30% ~ 100%）----
+        if job.get("_cancel"):
+            job["status"] = "failed"
+            job["error"] = "已取消（文献已删除）"
+            return
         t_cfg = dict(settings.translate_config)  # 拷贝：术语表等运行期注入不污染全局配置
         target_lang = t_cfg.get("target_language", "en")
         source_lang = t_cfg.get("source_language", "zh")
@@ -1060,6 +1082,13 @@ async def _process_pipeline(
             await asyncio.gather(
                 *[_fx_one(p, b) for p, b in fx_targets], return_exceptions=True
             )
+
+        # 取消检查（最后闸口）：文献删除后绝不回写索引
+        if job.get("_cancel"):
+            job["status"] = "failed"
+            job["error"] = "已取消（文献已删除）"
+            job["finished_at"] = time.time()
+            return
 
         job["pages"] = pages
         job["status"] = "done"

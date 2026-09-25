@@ -345,6 +345,17 @@ async def api_pipeline_running():
     return list_running_jobs()
 
 
+@app.post("/api/pipeline/cancel")
+async def api_cancel_pipeline(payload: dict):
+    """取消进行中的翻译任务（删除文献联动）。任务不存在/已结束返回 ok=false。"""
+    from pipeline import processor
+
+    job_id = str(payload.get("job_id") or "").strip()
+    if not job_id:
+        raise HTTPException(status_code=400, detail="缺少 job_id")
+    return {"ok": processor.cancel_job(job_id)}
+
+
 @app.get("/api/pipeline/status/{job_id}")
 async def api_get_pipeline_status(job_id: str):
     try:
