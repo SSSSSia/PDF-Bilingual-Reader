@@ -12,13 +12,8 @@ import ConfirmDialog from "./common/ConfirmDialog";
  * - Markdown 译文：重排版双语内容（原文/译文成对，可二次编辑）；
  * - PDF·原版对照：BabelDOC 双语 PDF——已有成品直接另存；未生成则引导去
  * 「原版双语对照」模式生成（独立翻译整篇需数分钟），完成后回来导出。
- * babeldoc 上传文档无重排版内容：仅保留 PDF 项（= 另存对照 PDF 副本）。
  */
-export default function ExportBar({
-  babeldocDoc = false,
-}: {
-  babeldocDoc?: boolean;
-}) {
+export default function ExportBar() {
   const { pages, file, filePath, setError } = usePdfStore();
   const { config } = useConfigStore();
   const bdoc = useBabelDocStore();
@@ -126,7 +121,6 @@ export default function ExportBar({
             aria-label="导出格式"
             className="absolute right-0 top-full z-30 mt-1.5 w-64 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800"
           >
-            {!babeldocDoc && (
             <button
               role="menuitem"
               onClick={() => choose("markdown")}
@@ -157,7 +151,6 @@ export default function ExportBar({
                 </span>
               </span>
             </button>
-            )}
             <button
               role="menuitem"
               onClick={() => choose("pdf")}

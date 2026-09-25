@@ -11,14 +11,15 @@ const OPTIONS: {
     value: "typeset",
     title: "智能重排版",
     desc: "解析论文结构后重新排版，中文与原文逐段对照",
-    badge: "推荐",
+    badge: "默认",
     features: ["重排版·左右对照 / 紧跟", "原版PDF·点击翻译", "Markdown 译文导出"],
   },
   {
     value: "babeldoc",
     title: "原版对照",
     desc: "保留论文原始排版，生成原版+译文的对照 PDF",
-    features: ["版式还原更稳（公式/复杂版式）", "生成约需数分钟，完成自动打开", "仅支持英→中"],
+    badge: "推荐",
+    features: ["版式还原更稳（公式/复杂版式）", "重排版可稍后在阅读页补跑", "仅支持英→中"],
   },
 ];
 

@@ -8,7 +8,6 @@ import {
 } from "../stores/uiStore";
 import { useConfigStore } from "../stores/configStore";
 import { usePdfStore } from "../stores/pdfStore";
-import { useSessionsStore } from "../stores/sessionsStore";
 import ExportBar from "./ExportBar";
 
 /**
@@ -26,12 +25,7 @@ export default function ReaderToolbar() {
   const { mode, setMode, readerMode, setReaderMode, zoom: zoomRaw, stepZoom, resetZoom, theme, setTheme, toggleTheme } =
     useUiStore();
   const { setTheme: saveTheme } = useConfigStore();
-  const { filePath, file, sessionKey } = usePdfStore();
-  // 上传即对照文档（reader=babeldoc）：无重排版内容，工具栏收敛为
-  // 单一「原版对照」形态（无模式切换、无 Markdown 导出）
-  const isBabeldocDoc = useSessionsStore((s) =>
-    sessionKey ? s.getByKey(sessionKey)?.reader === "babeldoc" : false,
-  );
+  const { filePath, file } = usePdfStore();
   const navigate = useNavigate();
   const sourceMissing = !filePath;
   // 显示与边界判断用有效缩放值（未设置过时按形态回落缺省：
@@ -86,31 +80,9 @@ export default function ReaderToolbar() {
       </div>
 
       {/* 中：模式分段控件（mockup 方案 A 居中为主角）。
-          babeldoc 文档无重排版内容：收敛为单一静态「原版对照」形态 */}
+          babeldoc 上传文档同样保留四模式：重排版两态未跑翻译时由
+          阅读页的引导卡接管（BabeldocRewriteGate），工具栏不做收敛 */}
 
-      {isBabeldocDoc ? (
-        <div
-          className="inline-flex shrink-0 items-center rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800"
-          role="tablist"
-          aria-label="阅读模式"
-        >
-          <span
-            aria-hidden="true"
-            className="select-none px-2 text-xs text-slate-400 dark:text-slate-500"
-          >
-            原版对照
-          </span>
-          <button
-            role="tab"
-            aria-selected={true}
-            disabled
-            title="上传时选择的「原版对照」模式（保留论文原始排版）"
-            className={segBtn(true)}
-          >
-            左右对照
-          </button>
-        </div>
-      ) : (
       <div
         className="inline-flex shrink-0 items-center rounded-lg border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-800"
         role="tablist"
@@ -187,7 +159,6 @@ export default function ReaderToolbar() {
           点击翻译
         </button>
       </div>
-      )}
 
       {/* 右：缩放 / 主题 / 导出 */}
 
@@ -237,7 +208,7 @@ export default function ReaderToolbar() {
         >
           {theme === "dark" ? "🌞" : "🌙"}
         </button>
-        <ExportBar babeldocDoc={isBabeldocDoc} />
+        <ExportBar />
       </div>
     </div>
   );

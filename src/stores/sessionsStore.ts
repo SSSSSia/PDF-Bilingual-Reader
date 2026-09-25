@@ -196,11 +196,19 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   rekey: (oldKey, newKey, title) =>
     set((state) => {
       const pdf = usePdfStore.getState();
+      // 同 key 旧会话（如 babeldoc 上传会话）被任务会话接替时，
+      // reader 标记随迁——重排版补跑完成后文档仍是「对照」来源
+      const carried = state.sessions.find((s) => s.key === newKey);
       const sessions = state.sessions
         .filter((s) => s.key !== newKey) // 已有同 doc 会话则以文献库为准合并
         .map((s) =>
           s.key === oldKey
-            ? { ...s, key: newKey, title: title ?? s.title }
+            ? {
+                ...s,
+                key: newKey,
+                title: title ?? s.title,
+                reader: s.reader ?? carried?.reader,
+              }
             : s,
         );
       if (pdf.sessionKey === oldKey) pdf.setSessionKey(newKey);

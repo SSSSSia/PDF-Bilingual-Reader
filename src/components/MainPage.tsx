@@ -298,6 +298,7 @@ export default function MainPage() {
         key: doc.doc_id,
         title: doc.title,
         kind: "doc",
+        reader: doc.reader,
         snapshot: {
           filePath: r.file_exists ? doc.file_path : null,
           fileName: `${doc.title}.pdf`,

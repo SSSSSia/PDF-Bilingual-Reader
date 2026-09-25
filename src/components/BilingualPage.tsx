@@ -13,6 +13,7 @@ import ReaderToolbar from "./ReaderToolbar";
 import ReaderTabs from "./ReaderTabs";
 import OriginalReader from "./OriginalReader";
 import DualPdfPage from "./DualPdfPage";
+import BabeldocRewriteGate from "./common/BabeldocRewriteGate";
 import { useBabelDocStore } from "../stores/babeldocStore";
 
 // 纯图片块（图表快照）：后端已令译文=原文，前端整行居中渲染一次
@@ -106,11 +107,12 @@ export default function BilingualPage() {
   const babeldocActive = useBabelDocStore(
     (s) => s.phase === "running" || s.phase === "done",
   );
-  // 上传即对照文档：无重排版内容，恒呈现对照视图（含任务丢失后的
-  // 确认卡重生成兜底），并豁免无会话门禁
+  // 上传即对照文档（reader=babeldoc）：无会话门禁豁免；切到重排版
+  // 形态且尚未跑重排版翻译时展示引导卡（点按钮补跑）
   const isBabeldocDoc = useSessionsStore((s) =>
     sessionKey ? s.getByKey(sessionKey)?.reader === "babeldoc" : false,
   );
+  const showRewriteGate = isBabeldocDoc && blocks.length === 0;
 
   if (blocks.length === 0 && !babeldocActive && !isBabeldocDoc) {
     return (
@@ -149,11 +151,12 @@ export default function BilingualPage() {
       {/* 原版PDF 组：点击翻译=pdfjs 原样渲染 + 块坐标译文浮层；
           左右对照=左渲染右译文锚定对照；翻译进度见底部状态条。
           无会话但 BabelDOC 重接管运行中 → 直接呈现对照视图（F5 恢复）；
-          babeldoc 上传文档恒对照（无重排版内容） */}
+          babeldoc 上传文档切重排版形态且未跑翻译 → 重排版引导卡 */}
       {readerMode === "original_bilingual" ||
-      isBabeldocDoc ||
       (blocks.length === 0 && babeldocActive) ? (
         <DualPdfPage />
+      ) : showRewriteGate ? (
+        <BabeldocRewriteGate />
       ) : readerMode === "original_click" ? (
         <OriginalReader />
       ) : (
