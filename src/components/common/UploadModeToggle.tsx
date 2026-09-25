@@ -24,12 +24,42 @@ const OPTIONS: {
 ];
 
 /**
- * 翻译模式选择卡：添加文章页上传流程的第一步（选完再传）。
- * 记住上次选择；主页快捷上传不受影响（固定重排版）。
+ * 翻译模式选择：默认=两张模式选择卡（添加文章页 / 主页空状态，上传流程
+ * 第一步）；compact=页头紧凑分段切换（有文献时的主页页头，无说明文字）。
+ * 记住上次选择；主页与添加页上传均按当前选中模式分流。
  */
-export default function UploadModeToggle() {
+export default function UploadModeToggle({ compact = false }: { compact?: boolean }) {
   const uploadMode = useUiStore((s) => s.uploadMode);
   const setUploadMode = useUiStore((s) => s.setUploadMode);
+  if (compact) {
+    return (
+      <div
+        role="radiogroup"
+        aria-label="翻译模式"
+        className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800"
+      >
+        {OPTIONS.map((o) => {
+          const active = uploadMode === o.value;
+          return (
+            <button
+              key={o.value}
+              role="radio"
+              aria-checked={active}
+              title={o.desc}
+              onClick={() => setUploadMode(o.value)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150 ${
+                active
+                  ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-white"
+                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              {o.title}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div
       role="radiogroup"

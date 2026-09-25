@@ -13,6 +13,7 @@ import {
   EXTRACT_DONE,
 } from "../lib/translationManager";
 import ConfirmDialog from "./common/ConfirmDialog";
+import UploadModeToggle from "./common/UploadModeToggle";
 import { startBabeldocUpload, openBabeldocDoc } from "../lib/babeldocUpload";
 import {
   openFileDialog,
@@ -39,7 +40,7 @@ import LoadingSpinner from "./common/LoadingSpinner";
 export default function MainPage() {
   const { folderId } = useParams();
   const { pages, isLoading, error, result, setError } = usePdfStore();
-  const { mode } = useUiStore();
+  const { mode, uploadMode } = useUiStore();
   const { docs, folders, loaded, fetchAll, moveDoc, deleteDoc } =
     useLibraryStore();
   const sessions = useSessionsStore((s) => s.sessions);
@@ -384,23 +385,26 @@ export default function MainPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           {currentFolder ? currentFolder.name : "文献库"}
         </h1>
-        <button
-          onClick={() => navigate("/add")}
-          className="btn-primary inline-flex items-center gap-1.5"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            className="h-4 w-4"
-            aria-hidden="true"
+        <div className="flex items-center gap-3">
+          <UploadModeToggle compact />
+          <button
+            onClick={() => navigate("/add")}
+            className="btn-primary inline-flex items-center gap-1.5"
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          添加文章
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            添加文章
+          </button>
+        </div>
       </header>
 
       {/* 空状态：整块拖拽上传区作主视觉（入口不丢弃）；文件夹不存在单独提示 */}
@@ -411,50 +415,62 @@ export default function MainPage() {
         </p>
       )}
       {loaded && !folderId && !hasDocs && (
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label="拖入或选择 PDF 文件开始翻译"
-          onClick={handleBrowse}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
+        <div>
+          {/* 翻译模式选择：与添加页同款卡片，主页上传同样按所选模式分流 */}
+          <p className="mt-8 text-sm font-medium text-slate-700 dark:text-slate-300">
+            选择翻译模式
+          </p>
+          <div className="mt-3">
+            <UploadModeToggle />
+          </div>
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="拖入或选择 PDF 文件开始翻译"
+            onClick={handleBrowse}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleBrowse();
+              }
+            }}
+            onDragOver={(e) => {
+              if (isTauri()) return;
               e.preventDefault();
-              handleBrowse();
-            }
-          }}
-          onDragOver={(e) => {
-            if (isTauri()) return;
-            e.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          className={`mt-8 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-16 text-center transition-colors duration-150 sm:py-20 ${
-            isDragging
-              ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/20"
-              : "border-slate-300 hover:border-blue-400 hover:bg-white dark:border-slate-600 dark:hover:border-blue-500 dark:hover:bg-slate-800/60"
-          }`}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-12 w-12 text-slate-300 dark:text-slate-600"
-            aria-hidden="true"
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            className={`mt-5 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-16 text-center transition-colors duration-150 sm:py-20 ${
+              isDragging
+                ? "border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/20"
+                : "border-slate-300 hover:border-blue-400 hover:bg-white dark:border-slate-600 dark:hover:border-blue-500 dark:hover:bg-slate-800/60"
+            }`}
           >
-            <path d="M14.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V7L14.5 3z" />
-            <path d="M14.5 3v4h4" />
-            <path d="M12 11v6M9.5 14.5 12 17l2.5-2.5" />
-          </svg>
-          <p className="text-base font-medium text-slate-900 dark:text-slate-100">
-            {isDragging ? "松开即可开始翻译" : "将 PDF 拖放到这里"}
-          </p>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            或点击选择文件 · 翻译完成后自动加入文献库
-          </p>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-12 w-12 text-slate-300 dark:text-slate-600"
+              aria-hidden="true"
+            >
+              <path d="M14.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V7L14.5 3z" />
+              <path d="M14.5 3v4h4" />
+              <path d="M12 11v6M9.5 14.5 12 17l2.5-2.5" />
+            </svg>
+            <p className="text-base font-medium text-slate-900 dark:text-slate-100">
+              {isDragging ? "松开即可开始翻译" : "将 PDF 拖放到这里"}
+            </p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              或点击选择文件 ·{" "}
+              {uploadMode === "babeldoc"
+                ? "生成完成后自动打开对照视图"
+                : "翻译完成后自动加入文献库"}
+            </p>
+          </div>
         </div>
       )}
 
