@@ -9,7 +9,7 @@ const OPTIONS: {
 }[] = [
   {
     value: "typeset",
-    title: "智能重排版",
+    title: "重排版",
     desc: "解析论文结构后重新排版，中文与原文逐段对照",
     badge: "默认",
     features: ["重排版·左右对照 / 紧跟", "原版PDF·点击翻译", "Markdown 译文导出"],
@@ -24,42 +24,13 @@ const OPTIONS: {
 ];
 
 /**
- * 翻译模式选择：默认=两张模式选择卡（添加文章页 / 主页空状态，上传流程
- * 第一步）；compact=页头紧凑分段切换（有文献时的主页页头，无说明文字）。
+ * 翻译模式选择卡（添加文章页 / 主页空状态）：上传流程的第一步。
  * 记住上次选择；主页与添加页上传均按当前选中模式分流。
+ * 不提供页头常驻切换——它看起来像文献筛选器，而文献库并不按模式分类。
  */
-export default function UploadModeToggle({ compact = false }: { compact?: boolean }) {
+export default function UploadModeToggle() {
   const uploadMode = useUiStore((s) => s.uploadMode);
-  const setUploadMode = useUiStore((s) => s.setUploadMode);
-  if (compact) {
-    return (
-      <div
-        role="radiogroup"
-        aria-label="翻译模式"
-        className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800"
-      >
-        {OPTIONS.map((o) => {
-          const active = uploadMode === o.value;
-          return (
-            <button
-              key={o.value}
-              role="radio"
-              aria-checked={active}
-              title={o.desc}
-              onClick={() => setUploadMode(o.value)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-150 ${
-                active
-                  ? "bg-white text-slate-900 shadow-sm dark:bg-slate-600 dark:text-white"
-                  : "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-              }`}
-            >
-              {o.title}
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
+  const setUploadMode = (m: UploadMode) => useUiStore.getState().setUploadMode(m);
   return (
     <div
       role="radiogroup"

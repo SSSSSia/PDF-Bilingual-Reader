@@ -385,27 +385,23 @@ export default function MainPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           {currentFolder ? currentFolder.name : "文献库"}
         </h1>
-        <div className="flex items-center gap-3">
-          {/* 空状态已有整版模式卡（拖拽区上方），页头切换仅非空状态显示 */}
-          {!(loaded && !folderId && !hasDocs) && <UploadModeToggle compact />}
-          <button
-            onClick={() => navigate("/add")}
-            className="btn-primary inline-flex items-center gap-1.5"
+        <button
+          onClick={() => navigate("/add")}
+          className="btn-primary inline-flex items-center gap-1.5"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="h-4 w-4"
+            aria-hidden="true"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              className="h-4 w-4"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            添加文章
-          </button>
-        </div>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          添加文章
+        </button>
       </header>
 
       {/* 空状态：整块拖拽上传区作主视觉（入口不丢弃）；文件夹不存在单独提示 */}
