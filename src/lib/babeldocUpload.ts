@@ -23,6 +23,7 @@ export function openBabeldocDoc(filePath: string, docId: string, title: string) 
       key: docId,
       title,
       kind: "doc",
+      reader: "babeldoc",
       snapshot: {
         filePath,
         fileName: `${title}.pdf`,

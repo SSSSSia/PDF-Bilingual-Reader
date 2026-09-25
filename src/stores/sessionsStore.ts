@@ -38,6 +38,9 @@ export interface Session {
   snapshot: SessionSnapshot;
   /** kind === "job" 时存在 */
   job?: SessionJob;
+  /** 阅读器标记：babeldoc = 上传即对照文档（无重排版内容）——
+   * 阅读页据此收敛为单一对照形态（工具栏无模式切换、无 Markdown 导出） */
+  reader?: "babeldoc";
 }
 
 /** 会话上限：超出按 lastActiveAt LRU 淘汰（翻译中的会话永不淘汰） */

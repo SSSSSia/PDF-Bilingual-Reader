@@ -2,6 +2,7 @@ import { memo, useMemo, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { usePdfStore } from "../stores/pdfStore";
 import { useUiStore } from "../stores/uiStore";
+import { useSessionsStore } from "../stores/sessionsStore";
 import { useZoomWheel } from "../hooks/useZoomWheel";
 import type { TextBlock } from "../types";
 import MarkdownText from "./common/MarkdownText";
@@ -93,7 +94,7 @@ const BilingualBlockRow = memo(function BilingualBlockRow({
  * 缩放 prose 根字号（工具栏/页签为 chrome 不缩放；原版分支由 pdfjs scale 走）。
  */
 export default function BilingualPage() {
-  const { pages, isLoading, progress, error, file } = usePdfStore();
+  const { pages, isLoading, progress, error, file, sessionKey } = usePdfStore();
   const readerMode = useUiStore((s) => s.readerMode);
   // 用户未手动设置过缩放（null）时，重排版缺省 100%（排版基准）
   const zoom = useUiStore((s) => s.zoom) ?? 1;
@@ -105,8 +106,13 @@ export default function BilingualPage() {
   const babeldocActive = useBabelDocStore(
     (s) => s.phase === "running" || s.phase === "done",
   );
+  // 上传即对照文档：无重排版内容，恒呈现对照视图（含任务丢失后的
+  // 确认卡重生成兜底），并豁免无会话门禁
+  const isBabeldocDoc = useSessionsStore((s) =>
+    sessionKey ? s.getByKey(sessionKey)?.reader === "babeldoc" : false,
+  );
 
-  if (blocks.length === 0 && !babeldocActive) {
+  if (blocks.length === 0 && !babeldocActive && !isBabeldocDoc) {
     return (
       <div className="py-20 text-center">
         <div
@@ -142,8 +148,10 @@ export default function BilingualPage() {
 
       {/* 原版PDF 组：点击翻译=pdfjs 原样渲染 + 块坐标译文浮层；
           左右对照=左渲染右译文锚定对照；翻译进度见底部状态条。
-          无会话但 BabelDOC 重接管运行中 → 直接呈现对照视图（F5 恢复） */}
+          无会话但 BabelDOC 重接管运行中 → 直接呈现对照视图（F5 恢复）；
+          babeldoc 上传文档恒对照（无重排版内容） */}
       {readerMode === "original_bilingual" ||
+      isBabeldocDoc ||
       (blocks.length === 0 && babeldocActive) ? (
         <DualPdfPage />
       ) : readerMode === "original_click" ? (

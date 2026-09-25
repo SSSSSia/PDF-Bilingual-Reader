@@ -17,6 +17,7 @@ export default function AddArticlePage() {
   const navigate = useNavigate();
   const [isDragging, setIsDragging] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const uploadMode = useUiStore((s) => s.uploadMode);
 
   // 按当前选中的翻译模式分流：BabelDOC 模式入库后直接对照生成；
   // 重排版模式交给 translationManager 后台翻译（成功回文档库看进度）。
@@ -122,7 +123,15 @@ export default function AddArticlePage() {
       </h1>
 
       <div className="card mt-8 p-4 sm:p-5">
-        <p className="flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
+        {/* 第一步：选翻译模式（选完再传；记住上次选择） */}
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+          选择翻译模式
+        </p>
+        <div className="mt-3">
+          <UploadModeToggle />
+        </div>
+
+        <p className="mt-5 flex items-center gap-1.5 border-t border-slate-100 pt-4 text-sm font-medium text-slate-700 dark:border-slate-700 dark:text-slate-300">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -138,10 +147,6 @@ export default function AddArticlePage() {
           </svg>
           上传本地文件
         </p>
-
-        <div className="mt-3 flex justify-end">
-          <UploadModeToggle />
-        </div>
 
         <div
           role="button"
@@ -189,7 +194,9 @@ export default function AddArticlePage() {
             </span>
           </p>
           <p className="text-xs text-slate-400 dark:text-slate-500">
-            仅支持 PDF 文件 · 翻译完成后自动加入文档库
+            {uploadMode === "babeldoc"
+              ? "仅支持 PDF 文件 · 生成完成后自动打开对照视图"
+              : "仅支持 PDF 文件 · 翻译完成后自动加入文档库"}
           </p>
         </div>
 

@@ -12,7 +12,6 @@ import {
   EXTRACT_DONE,
 } from "../lib/translationManager";
 import ConfirmDialog from "./common/ConfirmDialog";
-import UploadModeToggle from "./common/UploadModeToggle";
 import { startBabeldocUpload, openBabeldocDoc } from "../lib/babeldocUpload";
 import {
   openFileDialog,
@@ -176,22 +175,8 @@ export default function MainPage() {
       return;
     }
     const fileName = selected.split(/[\\/]/).pop() || selected;
-    // BabelDOC 上传模式：不走自研管线，入库后直接对照生成（完成就地渲染）
-    if (useUiStore.getState().uploadMode === "babeldoc") {
-      // 生成器与主翻译并发是内存耗尽风险（DualPdfPage 门禁同口径）
-      if (currentTranslationKey()) {
-        setError("已有翻译任务进行中，BabelDOC 对照需等待其完成后再添加");
-        return;
-      }
-      navigatedRef.current = true; // 不走 pages 就绪 effect（该 effect 只服务重排版管线）
-      const err = await startBabeldocUpload(selected, fileName);
-      if (err) {
-        setError(err);
-        return;
-      }
-      navigate("/reader/bilingual");
-      return;
-    }
+    // 主页快捷上传固定走重排版管线；「BabelDOC 对照」模式仅由添加文章页
+    // 的模式选择卡触发（选择属于上传流程的一部分，不在主页常驻）
     // 不 await 轮询完成：跳转仍由上方 pages 就绪 effect 驱动；
     // 轮询在 translationManager 后台进行，MainPage 卸载不受影响。
     navigatedRef.current = false;
@@ -381,26 +366,23 @@ export default function MainPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
           {currentFolder ? currentFolder.name : "文献库"}
         </h1>
-        <div className="flex items-center gap-3">
-          <UploadModeToggle />
-          <button
-            onClick={() => navigate("/add")}
-            className="btn-primary inline-flex items-center gap-1.5"
+        <button
+          onClick={() => navigate("/add")}
+          className="btn-primary inline-flex items-center gap-1.5"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="h-4 w-4"
+            aria-hidden="true"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              className="h-4 w-4"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            添加文章
-          </button>
-        </div>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          添加文章
+        </button>
       </header>
 
       {/* 空状态：整块拖拽上传区作主视觉（入口不丢弃）；文件夹不存在单独提示 */}
@@ -584,9 +566,10 @@ export default function MainPage() {
                   openingId ? "cursor-wait opacity-60" : ""
                 }`}
               >
-                {/* 缩略图：小尺寸居中（白边留白），不再整卡满铺 */}
+                {/* 缩略图：小尺寸居中（白边留白），不再整卡满铺；
+                    babeldoc 上传文档带「对照」角标，与普通文档一眼区分 */}
 
-                <div className="flex h-44 items-center justify-center overflow-hidden rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
+                <div className="relative flex h-44 items-center justify-center overflow-hidden rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
                   {thumbs[d.doc_id] ? (
                     <img
                       src={thumbs[d.doc_id]}
@@ -610,9 +593,18 @@ export default function MainPage() {
                         <path d="M14.5 3v4h4" />
                       </svg>
                       <span className="text-xs font-medium tracking-wide">
-                        {d.file_exists === false ? "源文件缺失" : "PDF"}
+                        {d.file_exists === false
+                          ? "源文件缺失"
+                          : d.reader === "babeldoc"
+                            ? "对照 PDF"
+                            : "PDF"}
                       </span>
                     </div>
+                  )}
+                  {d.reader === "babeldoc" && (
+                    <span className="absolute left-2 top-2 rounded-full bg-blue-600/90 px-2 py-0.5 text-[11px] font-medium text-white dark:bg-blue-500/90">
+                      对照
+                    </span>
                   )}
                 </div>
                 {/* 标题（两行截断） + 元信息；行内重命名态切换为输入框 */}
