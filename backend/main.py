@@ -736,5 +736,119 @@ async def api_export_babeldoc_cancel(job_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
     return babeldoc_export.get_status(job_id)
 
+# ---------------- 开发/随包启动：端口占用自愈 ----------------
+
+
+def _looks_like_our_backend(image_name: str, cmdline: str) -> bool:
+    """判断端口占用进程是否为本应用后端。只自动结束可确认身份的进程：
+    - 随包 sidecar：映像名/命令行含 pdf-backend（pdf-backend-od.exe 等）；
+    - 开发后端：python 进程且命令行含 backend + main.py。
+    其余（未知程序占用 8000）一律不碰。"""
+    n = (image_name or "").lower()
+    c = (cmdline or "").lower()
+    if n.startswith(("pdf-backend", "pdf_backend")) or "pdf-backend" in c:
+        return True
+    if n.startswith("python") and "backend" in c and "main.py" in c:
+        return True
+    return False
+
+
+def _process_identity(pid: int) -> tuple[str, str]:
+    """(映像名, 命令行)。查询失败返回空串（随后按身份不匹配处理）。
+
+    显式 errors="replace"：系统工具输出为本地码页（中文 Windows GBK），
+    子进程默认解码可能撞 UnicodeDecodeError（实测 uv 环境按 UTF-8 解码）。"""
+    import subprocess as _sp
+
+    try:
+        r = _sp.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
+        )
+        first = (r.stdout or "").strip().splitlines()[0] if r.stdout.strip() else ""
+        image = first.split('","')[0].strip('"') if '","' in first else ""
+    except Exception:
+        image = ""
+    try:
+        r = _sp.run(
+            ["wmic", "process", "where", f"processid={pid}", "get", "commandline", "/value"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
+        )
+        cmdline = next(
+            (ln.split("=", 1)[1] for ln in (r.stdout or "").splitlines()
+             if ln.startswith("CommandLine=")),
+            "",
+        )
+    except Exception:
+        cmdline = ""
+    if not cmdline:
+        try:
+            r = _sp.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=15,
+            )
+            cmdline = (r.stdout or "").strip()
+        except Exception:
+            pass
+    return image, cmdline
+
+
+def _free_port(port: int) -> None:
+    """启动前清理占用端口的旧后端进程（残留实例自愈）。
+
+    仅 Windows（开发与随包均实际只跑 Windows）；逐 PID 核身份后 taskkill，
+    身份不明者不杀、报错退出（uvicorn 否则只会抛裸 bind 异常）。"""
+    if sys.platform != "win32":
+        return
+    import subprocess as _sp
+
+    try:
+        out = _sp.run(
+            ["netstat", "-ano", "-p", "TCP"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
+        ).stdout
+    except Exception:
+        print(f"警告：无法枚举端口占用（netstat 失败），跳过端口 {port} 自动清理")
+        return
+    pids = set()
+    for line in (out or "").splitlines():
+        parts = line.split()
+        # TCP  127.0.0.1:8000  0.0.0.0:0  LISTENING  <pid>
+        if (
+            len(parts) >= 5
+            and parts[3] == "LISTENING"
+            and parts[1].rsplit(":", 1)[-1] == str(port)
+        ):
+            pids.add(parts[4])
+    unknown: list[tuple[str, str]] = []
+    for pid_s in pids:
+        pid = int(pid_s)
+        if pid == os.getpid():
+            continue
+        image, cmdline = _process_identity(pid)
+        if _looks_like_our_backend(image, cmdline):
+            try:
+                _sp.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                        capture_output=True, timeout=15)
+                print(f"已结束残留后端进程 PID={pid}（{image or 'backend'}），释放端口 {port}")
+            except Exception:
+                unknown.append((image, f"PID={pid} 结束失败"))
+        else:
+            unknown.append((image or "?", f"PID={pid}"))
+    if unknown:
+        detail = "；".join(f"{name}（{info}）" for name, info in unknown)
+        print(
+            f"端口 {port} 被其它程序占用：{detail}。"
+            "自动清理仅限本应用后端进程，请手动关闭占用者后重试。"
+        )
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
+    _free_port(8000)
     uvicorn.run(app, host="127.0.0.1", port=8000)
