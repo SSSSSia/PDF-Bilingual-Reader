@@ -77,12 +77,18 @@ export default function InlinePage() {
   const babeldocActive = useBabelDocStore(
     (s) => s.phase === "running" || s.phase === "done",
   );
-  // 上传即对照文档（reader=babeldoc）：无会话门禁豁免；切到重排版
-  // 形态且尚未跑重排版翻译时展示引导卡（点按钮补跑）
+  // 上传即对照文档（reader=babeldoc）：无会话门禁豁免；切到重排版/
+  // 点击翻译形态且尚未跑重排版翻译时展示引导卡（点按钮补跑）。
+  // 对照模式本身不在此列（直接呈现 DualPdfPage）；
+  // 判断必须先于 babeldocActive 兜底分支——否则对照任务 done 态恒真，
+  // 引导卡永远轮不到（实测：点重排版两态仍停留在对照页面）
   const isBabeldocDoc = useSessionsStore((s) =>
     sessionKey ? s.getByKey(sessionKey)?.reader === "babeldoc" : false,
   );
-  const showRewriteGate = isBabeldocDoc && blocks.length === 0;
+  const showRewriteGate =
+    isBabeldocDoc &&
+    blocks.length === 0 &&
+    readerMode !== "original_bilingual";
 
   if (blocks.length === 0 && !babeldocActive && !isBabeldocDoc) {
     return (
@@ -118,14 +124,14 @@ export default function InlinePage() {
         </div>
       )}
 
-      {/* 原版PDF 组；无会话但 BabelDOC 重接管运行中
-          → 直接呈现对照视图（F5 恢复，同 BilingualPage）；
-          babeldoc 上传文档切重排版形态且未跑翻译 → 重排版引导卡 */}
-      {readerMode === "original_bilingual" ||
-      (blocks.length === 0 && babeldocActive) ? (
-        <DualPdfPage />
-      ) : showRewriteGate ? (
+      {/* 引导卡最先判定（babeldoc 兜底分支会吞掉重排版形态）；
+          原版PDF 组；无会话但 BabelDOC 重接管运行中
+          → 直接呈现对照视图（F5 恢复，同 BilingualPage） */}
+      {showRewriteGate ? (
         <BabeldocRewriteGate />
+      ) : readerMode === "original_bilingual" ||
+        (blocks.length === 0 && babeldocActive && !isLoading) ? (
+        <DualPdfPage />
       ) : readerMode === "original_click" ? (
         <OriginalReader />
       ) : (

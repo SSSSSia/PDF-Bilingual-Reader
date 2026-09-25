@@ -70,12 +70,23 @@ export default function BabeldocRewriteGate() {
 
   const start = async () => {
     setError(null);
-    if (!filePath) {
+    if (!filePath || !sessionKey) {
       setError("源 PDF 缺失，无法运行重排版翻译");
       return;
     }
+    // 先捕获文档会话 key：startTranslation 会把 pdfStore 切到任务会话，
+    // 组件随之失联（isBabeldocDoc 依赖活跃会话的 reader 标记）
+    const docId = sessionKey;
     const r = await startTranslation(filePath, fileName || "文档");
-    if (!r.ok) setError(r.reason);
+    if (!r.ok) {
+      // 启动失败：回到文档会话原地显示错误（可重试）
+      useSessionsStore.getState().activate(docId);
+      setError(r.reason);
+      return;
+    }
+    // 启动成功：回到文档会话——进度由本卡读取任务会话驱动，
+    // 完成后任务会话 rekey 回 doc_id，快照就地换入（四种模式全可用）
+    useSessionsStore.getState().activate(docId);
   };
 
   if (runningJob) {
