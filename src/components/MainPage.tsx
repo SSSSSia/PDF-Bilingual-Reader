@@ -597,10 +597,11 @@ export default function MainPage() {
                   openingId ? "cursor-wait opacity-60" : ""
                 }`}
               >
-                {/* 缩略图：小尺寸居中（白边留白），不再整卡满铺；
-                    babeldoc 上传文档带「对照」角标，与普通文档一眼区分 */}
+                {/* 缩略图：小尺寸居中（白边留白），不再整卡满铺。
+                    reader=babeldoc 仅驱动打开行为（直进对照视图），
+                    不做视觉分类标记（与文献库不按模式分类的口径一致） */}
 
-                <div className="relative flex h-44 items-center justify-center overflow-hidden rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
+                <div className="flex h-44 items-center justify-center overflow-hidden rounded-lg bg-slate-100 p-3 dark:bg-slate-800">
                   {thumbs[d.doc_id] ? (
                     <img
                       src={thumbs[d.doc_id]}
@@ -624,18 +625,9 @@ export default function MainPage() {
                         <path d="M14.5 3v4h4" />
                       </svg>
                       <span className="text-xs font-medium tracking-wide">
-                        {d.file_exists === false
-                          ? "源文件缺失"
-                          : d.reader === "babeldoc"
-                            ? "对照 PDF"
-                            : "PDF"}
+                        {d.file_exists === false ? "源文件缺失" : "PDF"}
                       </span>
                     </div>
-                  )}
-                  {d.reader === "babeldoc" && (
-                    <span className="absolute left-2 top-2 rounded-full bg-blue-600/90 px-2 py-0.5 text-[11px] font-medium text-white dark:bg-blue-500/90">
-                      对照
-                    </span>
                   )}
                 </div>
                 {/* 标题（两行截断） + 元信息；行内重命名态切换为输入框 */}
