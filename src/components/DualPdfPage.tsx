@@ -290,6 +290,53 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
     return () => ro.disconnect();
   }, []);
 
+  // 选区修剪：文字层 span 是绝对定位，拖选落点在空白处时浏览器无法按
+  // 几何映射终点，按 DOM 序把对侧栏（原文）或相邻页整段卷入——复制出
+  // 英中重复内容。对照页左右互为译文、跨栏选择无意义：mouseup 后按
+  // 锚点所在栏保留（跨页时每页各自按本页中线判定同侧），剔除对侧；
+  // 正常栏内选择两端本就落在保留栏，零扰动。
+  useEffect(() => {
+    const trim = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+      const root = wrapRef.current;
+      if (!root) return;
+      const elOf = (n: Node | null): Element | null =>
+        n ? (n.nodeType === 3 ? n.parentElement : (n as Element)) : null;
+      const anchorEl = elOf(sel.anchorNode);
+      if (!anchorEl || !root.contains(anchorEl)) return;
+      const anchorSpan = anchorEl.closest("span");
+      const layer = anchorEl.closest(".textLayer");
+      if (!anchorSpan || !layer) return;
+      const midX =
+        layer.getBoundingClientRect().left + layer.getBoundingClientRect().width / 2;
+      const sideOf = (el: Element): "L" | "R" => {
+        const r = el.getBoundingClientRect();
+        return r.left + r.width / 2 < midX ? "L" : "R";
+      };
+      const keep = sideOf(anchorSpan);
+      const range = sel.getRangeAt(0);
+      const keepSpans = [
+        ...root.querySelectorAll<Element>(".textLayer span"),
+      ].filter((s) => range.intersectsNode(s) && sideOf(s) === keep);
+      if (keepSpans.length === 0) return;
+      const startEl = elOf(range.startContainer);
+      const endEl = elOf(range.endContainer);
+      const keepStart = startEl ? keepSpans.includes(startEl) : false;
+      const keepEnd = endEl ? keepSpans.includes(endEl) : false;
+      if (keepStart && keepEnd) return;
+      const trimmed = document.createRange();
+      if (keepStart) trimmed.setStart(range.startContainer, range.startOffset);
+      else trimmed.setStartBefore(keepSpans[0]);
+      if (keepEnd) trimmed.setEnd(range.endContainer, range.endOffset);
+      else trimmed.setEndAfter(keepSpans[keepSpans.length - 1]);
+      sel.removeAllRanges();
+      sel.addRange(trimmed);
+    };
+    document.addEventListener("mouseup", trim);
+    return () => document.removeEventListener("mouseup", trim);
+  }, []);
+
   const pageCount = pdf?.numPages ?? 0;
 
   return (
