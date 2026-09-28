@@ -87,7 +87,7 @@ export default function AddArticlePage() {
   };
 
   const handleDrop = async (e: React.DragEvent) => {
-    if (isTauri()) return;
+    // HTML5 drop 双通道兜底（同 MainPage）：原生钩子失效时走字节流上传
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
@@ -151,7 +151,6 @@ export default function AddArticlePage() {
             }
           }}
           onDragOver={(e) => {
-            if (isTauri()) return;
             e.preventDefault();
             setIsDragging(true);
           }}

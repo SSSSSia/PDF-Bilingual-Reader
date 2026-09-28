@@ -20,24 +20,35 @@ export function installTauriDragBridge(): void {
   installed = true;
   void import("@tauri-apps/api/webview")
     .then(({ getCurrentWebview }) =>
-      getCurrentWebview().onDragDropEvent((event) => {
-        const payload = event.payload;
-        if (payload.type === "enter" || payload.type === "over") {
-          window.dispatchEvent(new CustomEvent("tauri-file-drag"));
-        } else if (payload.type === "leave") {
-          window.dispatchEvent(new CustomEvent("tauri-file-drag-end"));
-        } else if (payload.type === "drop") {
-          window.dispatchEvent(new CustomEvent("tauri-file-drag-end"));
-          const paths = payload.paths;
-          if (paths && paths.length > 0) {
-            window.dispatchEvent(
-              new CustomEvent<string>("tauri-file-drop", { detail: paths[0] }),
-            );
+      getCurrentWebview()
+        .onDragDropEvent((event) => {
+          const payload = event.payload;
+          if (payload.type === "enter" || payload.type === "over") {
+            window.dispatchEvent(new CustomEvent("tauri-file-drag"));
+          } else if (payload.type === "leave") {
+            window.dispatchEvent(new CustomEvent("tauri-file-drag-end"));
+          } else if (payload.type === "drop") {
+            window.dispatchEvent(new CustomEvent("tauri-file-drag-end"));
+            const paths = payload.paths;
+            if (paths && paths.length > 0) {
+              window.dispatchEvent(
+                new CustomEvent<string>("tauri-file-drop", { detail: paths[0] }),
+              );
+            }
           }
-        }
-      }),
+        })
+        .then(() => {
+          // 留痕：拖拽再失灵时，logs/frontend.log 里有无这条即是分水岭
+          // （无=原生监听没注册上；有=监听活着但 WebView2 钩子失效，走 HTML5 兜底）
+          void import("./bridge").then(({ logFrontend }) =>
+            logFrontend("info", "tauri drag bridge registered"),
+          );
+        }),
     )
-    .catch(() => {
-      installed = false; // 非 Tauri 环境忽略（理论不可达：入口已判）
+    .catch((e) => {
+      installed = false; // 允许下次挂载重试
+      void import("./bridge").then(({ logFrontend }) =>
+        logFrontend("error", `tauri drag bridge register failed: ${String(e)}`),
+      );
     });
 }

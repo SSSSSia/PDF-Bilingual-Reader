@@ -202,7 +202,9 @@ export default function MainPage() {
 
   // 浏览器模式下 HTML5 拖拽（整页容器接收；Tauri 模式走 webview 事件，这里跳过）
   const handleDrop = async (e: React.DragEvent) => {
-    if (isTauri()) return;
+    // HTML5 drop 双通道兜底：原生拖拽钩子被玩坏时（Tauri/Windows 已知
+    // 问题），事件从这里走字节流上传（/api/upload 落库），与浏览器同码；
+    // 钩子正常时原生层消费 drop，HTML5 事件不触发，两条路互斥
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
@@ -353,7 +355,6 @@ export default function MainPage() {
     <div
       className="relative mx-auto max-w-5xl"
       onDragOver={(e) => {
-        if (isTauri()) return;
         e.preventDefault();
         setIsDragging(true);
       }}
@@ -423,7 +424,6 @@ export default function MainPage() {
               }
             }}
             onDragOver={(e) => {
-              if (isTauri()) return;
               e.preventDefault();
               setIsDragging(true);
             }}
