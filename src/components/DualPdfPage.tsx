@@ -549,6 +549,18 @@ function LazyPageCanvas({
             viewport: page.getViewport({ scale }),
           });
           await textLayer.render();
+          // 修剪 span 尾部空格：两端对齐行的提取文本在行尾带一串填充空格
+          // （有时是整段纯空格 span）——透明文字层里不可见，但被 ::selection
+          // 涂蓝时显形为"每行高亮右端超出固定一截"。剪掉后空盒塌缩、对齐/
+          // 命中不受影响（span 几何由 pdfjs 定死，剪的是尾部，前缀不动），
+          // 复制文本也更干净（实测 p2/p3 各 37/31 个 span 带尾部空格）
+          for (const s of container.querySelectorAll<HTMLSpanElement>("span")) {
+            const t = s.firstChild;
+            if (t && t.nodeType === 3) {
+              const text = t as Text;
+              if (/\s$/.test(text.data)) text.data = text.data.replace(/\s+$/, "");
+            }
+          }
         } catch (e) {
           // 文本层失败不能静默：图片照常显示但无法选字，用户无从反馈、
           // 我们无从诊断——真实错误落 frontend.log（dev/安装包均持久化）
