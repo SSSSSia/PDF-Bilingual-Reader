@@ -290,58 +290,40 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
     return () => ro.disconnect();
   }, []);
 
-  // 拖选钳制（对照栏内选区防跑飞）：文字层 span 绝对定位，拖选落点在空白处
-  // （栏间/行距/页边距）时浏览器无法按几何映射终点，按 DOM 序把对侧栏或相邻
-  // 页整段卷入——高亮越界、复制出英中重复内容。对照页左右互为译文，跨栏
-  // 选择无意义：全程只保留锚点（按下处）所在栏。
-  // 机制（实验页验证于 2026-09-28）：
-  // - selectionchange 实时钳制 + mouseup 兜底，拖动中即修，松手后保证正确；
-  // - 跑飞判定看**全部相交 span**（上一版只看选区两端点，端点都在译文 span
-  //   而中间夹了原文块时被绕过——用户实测残留左侧高亮条）；
-  // - 落点空白时终点由指针坐标几何取「最近同侧 span」重建，不再信任浏览器
-  //   映射出的 DOM 终点（曾一路卷到层首）；
-  // - WebView2/Chromium 的 addRange 多段选区实测被替换（rangeCount 恒 1），
-  //   单 Range 跨页必卷入下一页左栏块 → 终点封顶在锚点所在页；
-  // - 空白处起拖时浏览器把 anchorNode 记成容器 DIV → 用按下点最近 span 兜底
-  //   认定锚点栏；正常栏内拖选/双击选词不跨栏 → 零扰动（clean 短路）。
+  // 拖选（WPS 式几何选区，实验页验证于 2026-09-28）：文字层 span 绝对定位，
+  // 浏览器默认拖选在空白落点（栏间/行距/页边距）无法几何映射终点，按 DOM 序
+  // 乱卷（跑飞 + 拖动中闪烁的根源）——完全接管手势：锚点与终点都由指针坐标
+  // 几何映射成「span + 字符 offset」，选区 = 两者之间阅读序全含（dual 页文字
+  // 层 DOM 序即阅读序：每页左栏原文块在前、右栏译文块在后，实验确认）。
+  // 语义与标准 PDF 阅读器（WPS/Acrobat）一致：
+  // - 栏内拖选 = 纯该栏，字符级精确（起点行从按下的字起、终点行到滑到的字
+  //   止，行尾空格不吃——高亮不溢出到空白）；
+  // - 跨页拖选 = 本页剩余 + 下页左栏全选 + 下页右栏到落点（引擎原生选区不
+  //   支持多段，阅读序单 Range 是上限最优解）；
+  // - 高亮与 Ctrl+C 仍是原生 selection（所见即所得）；双击选词（中文无空格
+  //   整段、英文按词）、单击收起、Escape 清除。
   useEffect(() => {
-    let px = 0;
-    let py = 0;
-    let downX = -1;
-    let downY = -1;
-    let applying = false;
-    const sideCache = new WeakMap<Element, "L" | "R">();
-    const elOf = (n: Node | null): Element | null =>
-      n ? (n.nodeType === 3 ? n.parentElement : (n as Element)) : null;
-    const sideOf = (sp: Element): "L" | "R" => {
-      const cached = sideCache.get(sp);
-      if (cached) return cached;
-      const layer = sp.closest(".textLayer");
-      const lr = layer?.getBoundingClientRect();
-      const r = sp.getBoundingClientRect();
-      // 先看边缘（左栏行止于中线前、右栏行起于中线后），跨中线的宽盒
-      // （免责声明等整行拉伸 span，实测 left 可达 -162）退回中心判定
-      const midX = lr ? lr.left + lr.width / 2 : 0;
-      const side: "L" | "R" =
-        lr && r.right <= midX + 1
-          ? "L"
-          : lr && r.left >= midX - 1
-            ? "R"
-            : r.left + r.width / 2 < midX
-              ? "L"
-              : "R";
-      sideCache.set(sp, side);
-      return side;
-    };
+    const root = wrapRef.current;
+    if (!root) return;
+    let dragging = false;
+    let moved = false;
+    let downX = 0;
+    let downY = 0;
+    let lastX = 0;
+    let lastY = 0;
+    let anchor: { node: Text; offset: number } | null = null;
+    let focus: { node: Text; offset: number } | null = null;
+
+    const spans = () => [...root.querySelectorAll<Element>(".textLayer span")];
     const dist = (r: DOMRect, x: number, y: number) =>
       Math.hypot(
         Math.max(r.left - x, 0, x - r.right),
         Math.max(r.top - y, 0, y - r.bottom),
       );
-    const nearest = (x: number, y: number, pool: Element[]) => {
+    const nearestSpan = (x: number, y: number) => {
       let best: Element | null = null;
       let bestD = Infinity;
-      for (const s of pool) {
+      for (const s of spans()) {
         const d = dist(s.getBoundingClientRect(), x, y);
         if (d < bestD) {
           bestD = d;
@@ -350,123 +332,120 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
       }
       return { best, bestD };
     };
-    const clamp = () => {
-      if (applying) return;
-      const sel = window.getSelection();
-      const root = wrapRef.current;
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !root) return;
-      const spans = [...root.querySelectorAll<Element>(".textLayer span")];
-      if (spans.length === 0) return;
-      // 锚点 span：选区锚点不在 span 内（空白起拖，浏览器把 anchorNode 记成
-      // 容器 DIV）时，用按下点最近 span 兜底；离任何 span 都远则非文字手势
-      let anchorSpan: Element | null = null;
-      const anchorEl = elOf(sel.anchorNode);
-      if (anchorEl && root.contains(anchorEl)) {
-        anchorSpan = anchorEl.closest("span");
-      }
-      if (!anchorSpan) {
-        if (downX < 0) return;
-        const near = nearest(downX, downY, spans);
-        if (!near.best || near.bestD > 80) return;
-        anchorSpan = near.best;
-      }
-      const layer = anchorSpan.closest(".textLayer");
-      if (!layer) return;
-      const keep = sideOf(anchorSpan);
-      // 跑飞判定：选区相交的对侧 span（全集扫描，非仅端点）；与文字层无任何
-      // 相交的选区（别处 UI 的选择）放行
-      let runaway = false;
-      let anyHit = false;
-      for (const s of spans) {
-        let hit = false;
-        for (let i = 0; i < sel.rangeCount; i++) {
-          if (sel.getRangeAt(i).intersectsNode(s)) {
-            hit = true;
-            break;
-          }
+    // 指针 → 文字位置：最近 span + 字符 offset（二分：最大的 i 使 [0,i) 的
+    // 右缘 <= x）。终点落在尾部空格区时收紧到末个非空格字符（高亮不打到
+    // 行尾空白）；竖排/空文本退化为 span 边界。
+    const posAt = (x: number, y: number): { node: Text; offset: number } | null => {
+      const { best } = nearestSpan(x, y);
+      const first = best?.firstChild;
+      if (!first || first.nodeType !== 3) return null;
+      const t = first as Text;
+      const len = t.length;
+      if (!len) return null;
+      const r = best!.getBoundingClientRect();
+      let off: number;
+      if (r.height > r.width * 2.5) {
+        off = y <= r.top + r.height / 2 ? 0 : len;
+      } else {
+        let lo = 0;
+        let hi = len;
+        const probe = document.createRange();
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1;
+          probe.setStart(t, 0);
+          probe.setEnd(t, mid);
+          if (probe.getBoundingClientRect().right <= x) lo = mid;
+          else hi = mid - 1;
         }
-        if (!hit) continue;
-        anyHit = true;
-        if (sideOf(s) !== keep) {
-          runaway = true;
-          break;
-        }
+        off = lo;
       }
-      if (!anyHit || !runaway) return;
-      const pageKept = spans.filter(
-        (s) => sideOf(s) === keep && s.closest(".textLayer") === layer,
-      );
-      const { best } = nearest(px, py, pageKept);
-      if (!best) return;
-      const ai = pageKept.indexOf(anchorSpan);
-      const bi = pageKept.indexOf(best);
-      if (ai < 0 || bi < 0) return;
-      let lo = Math.min(ai, bi);
-      let hi = Math.max(ai, bi);
-      // 连通窗口收缩：目标区间里相邻保留 span 之间夹了对侧内容时（非 blocked
-      // 排版兜底；br 是零宽换行不阻断），收缩到锚点所在最大连通窗口
-      const keptSet = new Set(pageKept);
-      const adjacent = (a: Element, b: Element) => {
-        if (a.parentElement !== b.parentElement) return false;
-        const sibs = a.parentElement!.children;
-        const ia = Array.prototype.indexOf.call(sibs, a);
-        const ib = Array.prototype.indexOf.call(sibs, b);
-        for (let j = ia + 1; j < ib; j++) {
-          if (!keptSet.has(sibs[j]) && sibs[j].tagName !== "BR") return false;
-        }
-        return true;
-      };
-      let contigLo = ai;
-      while (contigLo > 0 && adjacent(pageKept[contigLo - 1], pageKept[contigLo])) {
-        contigLo--;
-      }
-      let contigHi = ai;
-      while (
-        contigHi < pageKept.length - 1 &&
-        adjacent(pageKept[contigHi], pageKept[contigHi + 1])
-      ) {
-        contigHi++;
-      }
-      if (lo < contigLo || hi > contigHi) {
-        lo = contigLo;
-        hi = contigHi;
-      }
-      const run = pageKept.slice(lo, hi + 1);
-      const rg = document.createRange();
-      rg.setStartBefore(run[0]);
-      rg.setEndAfter(run[run.length - 1]);
-      applying = true;
-      try {
-        sel.removeAllRanges();
-        sel.addRange(rg);
-      } finally {
-        applying = false;
-      }
+      const s = t.data;
+      let k = len - 1;
+      while (k >= 0 && /\s/.test(s[k])) k--;
+      if (off > k + 1) off = k + 1;
+      return { node: t, offset: off };
     };
-    const onDown = (e: PointerEvent) => {
-      downX = e.clientX;
-      downY = e.clientY;
-      px = e.clientX;
-      py = e.clientY;
+    const before = (
+      a: { node: Text; offset: number },
+      b: { node: Text; offset: number },
+    ) =>
+      a.node === b.node
+        ? a.offset <= b.offset
+        : !!(a.node.compareDocumentPosition(b.node) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const apply = () => {
+      if (!anchor || !focus || !anchor.node.isConnected || !focus.node.isConnected)
+        return;
+      const sel = window.getSelection();
+      if (!sel) return;
+      const [s, e] = before(anchor, focus) ? [anchor, focus] : [focus, anchor];
+      sel.setBaseAndExtent(s.node, s.offset, e.node, e.offset);
+    };
+    const nearText = (x: number, y: number) => {
+      const n = nearestSpan(x, y);
+      return n.best !== null && n.bestD <= 80;
+    };
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      downX = lastX = e.clientX;
+      downY = lastY = e.clientY;
+      if (!nearText(e.clientX, e.clientY)) return;
+      e.preventDefault(); // 接管：原生拖选不启动（其中间态是闪烁/跑飞根源）
+      dragging = true;
+      moved = false;
+      anchor = focus = posAt(e.clientX, e.clientY);
     };
     const onMove = (e: PointerEvent) => {
-      px = e.clientX;
-      py = e.clientY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      if (!dragging) return;
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 3) moved = true;
+      focus = posAt(e.clientX, e.clientY);
+      apply();
     };
-    const onUp = (e: MouseEvent) => {
-      px = e.clientX;
-      py = e.clientY;
-      clamp();
+    const onUp = () => {
+      if (!dragging) return;
+      dragging = false;
+      if (!moved) {
+        window.getSelection()?.removeAllRanges();
+        anchor = focus = null;
+      }
     };
-    document.addEventListener("pointerdown", onDown, { passive: true });
+    const onScroll = () => {
+      if (!dragging) return;
+      focus = posAt(lastX, lastY); // 滚轮下内容移动，用最后指针坐标重算终点
+      apply();
+    };
+    const onDbl = (e: MouseEvent) => {
+      if (!nearText(e.clientX, e.clientY)) return;
+      e.preventDefault();
+      const p = posAt(e.clientX, e.clientY);
+      if (!p) return;
+      const s = p.node.data;
+      const ws = (c: string) => /\s/.test(c);
+      let a = p.offset;
+      let b = p.offset;
+      while (a > 0 && !ws(s[a - 1])) a--;
+      while (b < s.length && !ws(s[b])) b++;
+      anchor = { node: p.node, offset: a };
+      focus = { node: p.node, offset: b };
+      apply();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") window.getSelection()?.removeAllRanges();
+    };
+    root.addEventListener("mousedown", onDown);
+    root.addEventListener("dblclick", onDbl);
     document.addEventListener("pointermove", onMove, { passive: true });
-    document.addEventListener("selectionchange", clamp);
     document.addEventListener("mouseup", onUp);
+    document.addEventListener("keydown", onKey);
+    root.addEventListener("scroll", onScroll, { passive: true });
     return () => {
-      document.removeEventListener("pointerdown", onDown);
+      root.removeEventListener("mousedown", onDown);
+      root.removeEventListener("dblclick", onDbl);
       document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("selectionchange", clamp);
       document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("keydown", onKey);
+      root.removeEventListener("scroll", onScroll);
     };
   }, []);
 
