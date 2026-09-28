@@ -139,13 +139,17 @@ pub async fn backend_health(
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub async fn run_pipeline(state: State<'_, AppState>, file_path: String) -> Result<String, String> {
+pub async fn run_pipeline(
+    state: State<'_, AppState>,
+    file_path: String,
+    display_name: Option<String>,
+) -> Result<String, String> {
     ensure_backend_ready(&state).await?;
     let client = reqwest::Client::new();
     let url = format!("{}/api/pipeline/run", state.fastapi_url);
     let resp = client
         .post(&url)
-        .json(&serde_json::json!({ "file_path": file_path }))
+        .json(&serde_json::json!({ "file_path": file_path, "display_name": display_name }))
         .send()
         .await
         .map_err(|e| e.to_string())?;

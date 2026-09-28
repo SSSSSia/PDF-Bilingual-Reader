@@ -127,7 +127,7 @@ export default function MainPage() {
     }
   }, [isLoading, result, extractReady, pages, mode, navigate]);
 
-  const handlePath = async (selected: string) => {
+  const handlePath = async (selected: string, displayName?: string) => {
     if (!selected.toLowerCase().endsWith(".pdf")) {
       return;
     }
@@ -145,7 +145,9 @@ export default function MainPage() {
       setError("已有翻译任务进行中，请等待完成后再添加新任务");
       return;
     }
-    const fileName = selected.split(/[\\/]/).pop() || selected;
+    // 优先用调用方透传的原始文件名：拖拽/浏览器上传落库后路径是
+    // <sha1>.pdf 副本，从路径拆只能得到哈希串
+    const fileName = displayName || selected.split(/[\\/]/).pop() || selected;
     // 跟随添加页选定的翻译模式（localStorage 记忆）：BabelDOC 对照
     // 不走自研管线，入库后直接对照生成（完成就地渲染）
     if (useUiStore.getState().uploadMode === "babeldoc") {
@@ -172,9 +174,9 @@ export default function MainPage() {
   };
 
   const handleBrowse = async () => {
-    const selected = await openFileDialog();
-    if (!selected) return;
-    await handlePath(selected);
+    const picked = await openFileDialog();
+    if (!picked) return;
+    await handlePath(picked.path, picked.name);
   };
 
   // HTML5 拖拽上传（主通道）：drop 的 File 走字节流上传（/api/upload 落库）
@@ -188,8 +190,8 @@ export default function MainPage() {
       setError("仅支持 PDF 文件");
       return;
     }
-    const path = await uploadFile(dropped);
-    if (path) await handlePath(path);
+    const up = await uploadFile(dropped);
+    if (up) await handlePath(up.path, up.name);
   };
 
   /** 点击进度卡进入翻译会话：若当前活跃会话不是这一篇，

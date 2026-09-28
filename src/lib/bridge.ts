@@ -313,15 +313,26 @@ export async function openLocalPdf(filePath: string): Promise<void> {
   }
 }
 
-/** 启动流水线，返回与 Rust run_pipeline 一致的 JSON 字符串 */
-export async function runPipeline(filePath: string): Promise<string> {
+/** 启动流水线，返回与 Rust run_pipeline 一致的 JSON 字符串。
+ *  displayName 为原始文件名——路径可能是库内 <sha1>.pdf 副本，
+ *  不透传则后端文献库标题会记成哈希串 */
+export async function runPipeline(
+  filePath: string,
+  displayName?: string,
+): Promise<string> {
   if (isTauri()) {
-    return (await invoke("run_pipeline", { file_path: filePath })) as string;
+    return (await invoke("run_pipeline", {
+      file_path: filePath,
+      display_name: displayName ?? null,
+    })) as string;
   }
   const r = await apiFetch(`${API_BASE}/api/pipeline/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file_path: filePath }),
+    body: JSON.stringify({
+      file_path: filePath,
+      ...(displayName ? { display_name: displayName } : {}),
+    }),
   });
   return JSON.stringify(r);
 }
@@ -409,30 +420,39 @@ export function assetUrl(src: string): string {
   return src;
 }
 
-/** 打开文件选择对话框。Tauri 返回真实路径；浏览器走上传并返回服务端路径 */
-export async function openFileDialog(): Promise<string | null> {
+/** 打开文件选择对话框。Tauri 返回真实路径；浏览器走上传并返回服务端路径。
+ *  两者都带 name（原始文件名）——上传落库后路径是哈希副本，展示名只能靠它 */
+export async function openFileDialog(): Promise<{
+  path: string;
+  name: string;
+} | null> {
   if (isTauri()) {
     const selected = await tauriOpen({
       title: "选择 PDF 文件",
       filters: [{ name: "PDF", extensions: ["pdf"] }],
     });
-    return (selected as string | null) ?? null;
+    if (!selected) return null;
+    const p = selected as string;
+    return { path: p, name: p.split(/[\\/]/).pop() || p };
   }
   return uploadViaPicker();
 }
 
-/** 浏览器模式：把选中的 File 上传到后端，返回服务端路径（供流水线按路径读取） */
-export async function uploadFile(file: File): Promise<string> {
+/** 上传文件到后端落库，返回服务端路径 + 原始文件名（title 透传用） */
+export async function uploadFile(file: File): Promise<{
+  path: string;
+  name: string;
+}> {
   const form = new FormData();
   form.append("file", file);
   const data = (await apiFetch(`${API_BASE}/api/upload`, {
     method: "POST",
     body: form,
-  })) as { path: string };
-  return data.path;
+  })) as { path: string; name?: string };
+  return { path: data.path, name: data.name || file.name || "document.pdf" };
 }
 
-function uploadViaPicker(): Promise<string | null> {
+function uploadViaPicker(): Promise<{ path: string; name: string } | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";

@@ -324,7 +324,11 @@ async def api_run_pipeline(file_path: dict):
             status_code=400,
             detail="源文件不存在（可能已被移动、改名或删除）。请在文献库重新上传该 PDF，翻译缓存仍在、重传即恢复。",
         )
-    display = os.path.basename(fp)
+    # 展示名优先取调用方透传的原始文件名（拖拽上传时 fp 已是库内
+    # <sha1>.pdf，从路径取只会得到哈希串）；再保底 basename 防注入
+    display = os.path.basename(
+        str(file_path.get("display_name") or "").strip() or fp
+    )
     try:
         from library import materialize
 
@@ -610,7 +614,10 @@ async def api_upload(file: UploadFile = File(...)):
     if not os.path.isfile(dest):
         with open(dest, "wb") as f:
             f.write(content)
-    return {"path": dest}
+    # 库内副本按内容哈希命名，原始文件名经 name 传回——调用方继续透传给
+    # run_pipeline/display_name 或 import/title，否则文献库标题会变成哈希串
+    raw_name = os.path.basename(file.filename or "") or "document.pdf"
+    return {"path": dest, "name": raw_name}
 
 
 @app.post("/api/library/import")
@@ -630,6 +637,9 @@ async def api_library_import(payload: dict):
             status_code=400,
             detail="源文件不存在（可能已被移动、改名或删除）。请重新选择该 PDF。",
         )
+    # materialize 前先留原始 basename：入库后 fp 变 <sha1>.pdf，
+    # 标题兜底若落在其后只能是哈希串
+    raw_base = os.path.splitext(os.path.basename(fp))[0]
     try:
         fp = materialize(fp, settings.data_dir)
     except Exception as e:
@@ -649,7 +659,7 @@ async def api_library_import(payload: dict):
         logger.warning("入库读取页数失败 file=%s", fp, exc_info=True)
     title = str(payload.get("title") or "").strip()
     if not title:
-        title = os.path.splitext(os.path.basename(fp))[0]
+        title = raw_base
     # upsert 是整条替换：带旧记录字段（page_count 等）以免丢失
     old = docs_index.get_doc(settings.data_dir, pdf_hash[:16]) or {}
     docs_index.upsert_doc(

@@ -22,13 +22,14 @@ export default function AddArticlePage() {
   // 按当前选中的翻译模式分流：BabelDOC 模式入库后直接对照生成；
   // 重排版模式交给 translationManager 后台翻译（成功回文档库看进度）。
   // 无 Key 前置拦截：未配置直接提示并引导去设置，不发无效任务
-  const handleFile = async (path: string) => {
+  const handleFile = async (path: string, displayName?: string) => {
     const { configLoaded, isConfigured } = useConfigStore.getState();
     if (configLoaded && !isConfigured) {
       setLocalError("请先在设置中配置 API Key，再添加文章");
       return;
     }
-    const fileName = path.split(/[\\/]/).pop() || path;
+    // 优先用透传的原始文件名：上传落库后路径是 <sha1>.pdf 副本
+    const fileName = displayName || path.split(/[\\/]/).pop() || path;
     if (useUiStore.getState().uploadMode === "babeldoc") {
       // 生成器与主翻译并发是内存耗尽风险（DualPdfPage 门禁同口径）
       if (currentTranslationKey()) {
@@ -52,13 +53,13 @@ export default function AddArticlePage() {
   };
 
   const handleBrowse = async () => {
-    const selected = await openFileDialog();
-    if (!selected) return;
-    if (!selected.toLowerCase().endsWith(".pdf")) {
+    const picked = await openFileDialog();
+    if (!picked) return;
+    if (!picked.path.toLowerCase().endsWith(".pdf")) {
       setLocalError("仅支持 PDF 文件");
       return;
     }
-    void handleFile(selected);
+    void handleFile(picked.path, picked.name);
   };
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -71,8 +72,8 @@ export default function AddArticlePage() {
       setLocalError("仅支持 PDF 文件");
       return;
     }
-    const path = await uploadFile(file);
-    if (path) void handleFile(path);
+    const up = await uploadFile(file);
+    if (up) void handleFile(up.path, up.name);
   };
 
   return (

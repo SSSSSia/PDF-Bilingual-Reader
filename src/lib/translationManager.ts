@@ -155,7 +155,7 @@ export async function startTranslation(
 
   let start: PipelineResult;
   try {
-    const startStr = (await runPipeline(filePath)) as string;
+    const startStr = (await runPipeline(filePath, fileName)) as string;
     start = JSON.parse(startStr) as PipelineResult;
   } catch (e) {
     pdf.setLoading(false);
