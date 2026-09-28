@@ -177,16 +177,17 @@ export default function MainPage() {
     await handlePath(selected);
   };
 
-  // 浏览器模式下 HTML5 拖拽（整页容器接收；Tauri 模式走 webview 事件，这里跳过）
+  // HTML5 拖拽上传（主通道）：drop 的 File 走字节流上传（/api/upload 落库）
   const handleDrop = async (e: React.DragEvent) => {
-    // HTML5 drop 双通道兜底：原生拖拽钩子被玩坏时（Tauri/Windows 已知
-    // 问题），事件从这里走字节流上传（/api/upload 落库），与浏览器同码；
-    // 钩子正常时原生层消费 drop，HTML5 事件不触发，两条路互斥
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
     if (!dropped) return;
-    if (!dropped.name.toLowerCase().endsWith(".pdf")) return;
+    // 非 PDF 明确告知（与添加页同文案），静默忽略会让用户以为拖拽没反应
+    if (!dropped.name.toLowerCase().endsWith(".pdf")) {
+      setError("仅支持 PDF 文件");
+      return;
+    }
     const path = await uploadFile(dropped);
     if (path) await handlePath(path);
   };

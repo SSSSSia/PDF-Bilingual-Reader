@@ -62,7 +62,7 @@ export default function AddArticlePage() {
   };
 
   const handleDrop = async (e: React.DragEvent) => {
-    // HTML5 drop 双通道兜底（同 MainPage）：原生钩子失效时走字节流上传
+    // HTML5 拖拽上传（主通道）：drop 的 File 走字节流上传（/api/upload 落库）
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
