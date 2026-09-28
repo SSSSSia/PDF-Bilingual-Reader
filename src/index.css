@@ -176,17 +176,28 @@
   }
 }
 
-/* pdfjs 透明文本层（排版对照视图 DualPdfPage）：span 与 canvas 像素对齐、
+/* pdfjs v6 透明文本层（排版对照视图 DualPdfPage）：span 与 canvas 像素对齐、
    文字透明，仅供鼠标拖选/复制；选区高亮用交互蓝（比全站 ::selection 深，
-   透明字下要能看清选中范围） */
+   透明字下要能看清选中范围）。
+   几何规则须与官方 web/pdf_viewer.css 完整对齐：pdfjs 只给每个 span 写
+   --font-height 与 --scale-x，指望这里的 font-size/transform 落地——
+   精简版丢了这两条时文字层按继承字号（约 16px）渲染、比画布字形大一半，
+   选区涂色整体外溢到空白（2026-09-28 实测：补齐后 149/149 span 渲染宽度
+   与 PDF 块宽 ±2px 吻合，选区矩形逐 span 等宽贴合） */
 .textLayer {
   position: absolute;
-  overflow: hidden;
+  inset: 0;
+  overflow: clip;
   line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
   text-size-adjust: none;
   forced-color-adjust: none;
   transform-origin: 0 0;
   z-index: 2;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
 .textLayer span,
@@ -195,13 +206,22 @@
   color: transparent;
   white-space: pre;
   cursor: text;
-  transform-origin: 0 0;
+  transform-origin: 0% 0%;
   unicode-bidi: isolate;
+  user-select: text;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 
-.textLayer span.markedContent {
-  top: 0;
-  height: 0;
+.textLayer .markedContent {
+  display: contents;
+}
+
+.textLayer br::selection {
+  background: transparent;
 }
 
 .textLayer ::selection {
