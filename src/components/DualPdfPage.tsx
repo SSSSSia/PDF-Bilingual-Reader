@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { TextLayer } from "pdfjs-dist";
 import { usePdfStore } from "../stores/pdfStore";
 import { useBabelDocStore } from "../stores/babeldocStore";
+import { logFrontend } from "../lib/bridge";
 import { useUiStore, effectiveZoom } from "../stores/uiStore";
 import { useZoomWheel } from "../hooks/useZoomWheel";
 import { usePdfDocument } from "../hooks/usePdfDocument";
@@ -384,14 +385,22 @@ function LazyPageCanvas({
         container.replaceChildren();
         container.style.width = `${Math.floor(vp.width / dpr)}px`;
         container.style.height = `${Math.floor(vp.height / dpr)}px`;
-        textLayer = new TextLayer({
-          textContentSource: page.streamTextContent(),
-          container,
-          viewport: page.getViewport({ scale }),
-        });
-        await textLayer.render();
+        try {
+          textLayer = new TextLayer({
+            textContentSource: page.streamTextContent(),
+            container,
+            viewport: page.getViewport({ scale }),
+          });
+          await textLayer.render();
+        } catch (e) {
+          // 文本层失败不能静默：图片照常显示但无法选字，用户无从反馈、
+          // 我们无从诊断——真实错误落 frontend.log（dev/安装包均持久化）
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error(`TextLayer render failed (p${pageNo})`, e);
+          logFrontend("error", `TextLayer 渲染失败 p${pageNo}: ${msg}`);
+        }
       } catch {
-        /* 渲染中断（快速缩放/卸载）忽略 */
+        /* canvas 渲染中断（快速缩放/卸载）忽略 */
       }
     })();
     return () => {
