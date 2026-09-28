@@ -51,31 +51,6 @@ export default function AddArticlePage() {
     }
   };
 
-  // Tauri 环境下接收 App 级拖拽桥转发的系统文件拖拽（本页挂载期间生效；
-  // MainPage 的监听随其卸载而移除，/add 页必须自持一份，否则拖放无响应。
-  // 原生注册由 App 级 tauriDrag 单次完成，页面级反复注册会玩坏原生钩子）
-  useEffect(() => {
-    if (!("__TAURI_INTERNALS__" in window)) return;
-    const onDrop = (e: Event) => {
-      setIsDragging(false);
-      const path = (e as CustomEvent<string>).detail;
-      if (path && path.toLowerCase().endsWith(".pdf")) {
-        void handleFile(path);
-      }
-    };
-    const onDragEnter = () => setIsDragging(true);
-    const onDragEnd = () => setIsDragging(false);
-    window.addEventListener("tauri-file-drop", onDrop);
-    window.addEventListener("tauri-file-drag", onDragEnter);
-    window.addEventListener("tauri-file-drag-end", onDragEnd);
-    return () => {
-      window.removeEventListener("tauri-file-drop", onDrop);
-      window.removeEventListener("tauri-file-drag", onDragEnter);
-      window.removeEventListener("tauri-file-drag-end", onDragEnd);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleBrowse = async () => {
     const selected = await openFileDialog();
     if (!selected) return;

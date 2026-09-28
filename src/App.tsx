@@ -12,7 +12,6 @@ import ErrorBoundary from "./components/common/ErrorBoundary";
 import LoadingSpinner from "./components/common/LoadingSpinner";
 import ConfirmDialog from "./components/common/ConfirmDialog";
 import { logFrontend, listRunningTranslations, listRunningExports, waitForBackend, isTauri } from "./lib/bridge";
-import { installTauriDragBridge } from "./lib/tauriDrag";
 import { attach, currentTranslationKey } from "./lib/translationManager";
 import { useBabelDocStore } from "./stores/babeldocStore";
 
@@ -61,13 +60,6 @@ function App() {
   useEffect(() => {
     void loadConfig();
   }, [loadConfig]);
-
-  // Tauri 系统级文件拖拽桥：App 级只注册一次（页面经 window 自定义事件
-  // 接收）。此前各页面自注册，反复导航的注册/注销会把 WebView2 原生
-  // 拖拽钩子玩坏（实测数次页面切换后拖放整体失灵，重启才恢复）
-  useEffect(() => {
-    installTauriDragBridge();
-  }, []);
 
   // 启动时用配置文件中的主题/模式初始化（来自 Rust 端落盘的 config.ui）
   useEffect(() => {

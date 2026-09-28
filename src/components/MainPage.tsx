@@ -127,29 +127,6 @@ export default function MainPage() {
     }
   }, [isLoading, result, extractReady, pages, mode, navigate]);
 
-  // Tauri 环境下接收 App 级拖拽桥转发的系统文件拖拽（整页生效；
-  // HTML5 drop 在 Tauri 中会被拦截）。监听本身挂在 window 上，
-  // 注册由 App 级 tauriDrag 单次完成（页面级反复注册会玩坏原生钩子）
-  useEffect(() => {
-    if (!("__TAURI_INTERNALS__" in window)) return;
-    const onDrop = (e: Event) => {
-      setIsDragging(false);
-      const path = (e as CustomEvent<string>).detail;
-      if (path) handlePath(path);
-    };
-    const onDragEnter = () => setIsDragging(true);
-    const onDragEnd = () => setIsDragging(false);
-    window.addEventListener("tauri-file-drop", onDrop);
-    window.addEventListener("tauri-file-drag", onDragEnter);
-    window.addEventListener("tauri-file-drag-end", onDragEnd);
-    return () => {
-      window.removeEventListener("tauri-file-drop", onDrop);
-      window.removeEventListener("tauri-file-drag", onDragEnter);
-      window.removeEventListener("tauri-file-drag-end", onDragEnd);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handlePath = async (selected: string) => {
     if (!selected.toLowerCase().endsWith(".pdf")) {
       return;
