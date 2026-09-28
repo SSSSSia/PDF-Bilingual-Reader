@@ -127,36 +127,27 @@ export default function MainPage() {
     }
   }, [isLoading, result, extractReady, pages, mode, navigate]);
 
-  // Tauri 环境下监听 OS 文件拖拽（整页生效；HTML5 drop 在 Tauri 中会被拦截）
+  // Tauri 环境下接收 App 级拖拽桥转发的系统文件拖拽（整页生效；
+  // HTML5 drop 在 Tauri 中会被拦截）。监听本身挂在 window 上，
+  // 注册由 App 级 tauriDrag 单次完成（页面级反复注册会玩坏原生钩子）
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    if ("__TAURI_INTERNALS__" in window) {
-      import("@tauri-apps/api/webview")
-        .then(({ getCurrentWebview }) => {
-          getCurrentWebview()
-            .onDragDropEvent((event) => {
-              const payload = event.payload;
-              if (payload.type === "enter" || payload.type === "over") {
-                setIsDragging(true);
-              } else if (payload.type === "leave") {
-                setIsDragging(false);
-              } else if (payload.type === "drop") {
-                setIsDragging(false);
-                const paths = payload.paths;
-                if (paths && paths.length > 0) {
-                  handlePath(paths[0]);
-                }
-              }
-            })
-            .then((fn) => {
-              unlisten = fn;
-            });
-        })
-        .catch(() => {
-          /* 非 Tauri 环境忽略 */
-        });
-    }
-    return () => unlisten?.();
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    const onDrop = (e: Event) => {
+      setIsDragging(false);
+      const path = (e as CustomEvent<string>).detail;
+      if (path) handlePath(path);
+    };
+    const onDragEnter = () => setIsDragging(true);
+    const onDragEnd = () => setIsDragging(false);
+    window.addEventListener("tauri-file-drop", onDrop);
+    window.addEventListener("tauri-file-drag", onDragEnter);
+    window.addEventListener("tauri-file-drag-end", onDragEnd);
+    return () => {
+      window.removeEventListener("tauri-file-drop", onDrop);
+      window.removeEventListener("tauri-file-drag", onDragEnter);
+      window.removeEventListener("tauri-file-drag-end", onDragEnd);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handlePath = async (selected: string) => {

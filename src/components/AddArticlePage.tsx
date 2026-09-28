@@ -51,37 +51,28 @@ export default function AddArticlePage() {
     }
   };
 
-  // Tauri 环境下监听 OS 文件拖拽（本页挂载期间整页生效；MainPage 的监听
-  // 随其卸载而移除，/add 页必须自持一份，否则拖放无响应）
+  // Tauri 环境下接收 App 级拖拽桥转发的系统文件拖拽（本页挂载期间生效；
+  // MainPage 的监听随其卸载而移除，/add 页必须自持一份，否则拖放无响应。
+  // 原生注册由 App 级 tauriDrag 单次完成，页面级反复注册会玩坏原生钩子）
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    if ("__TAURI_INTERNALS__" in window) {
-      import("@tauri-apps/api/webview")
-        .then(({ getCurrentWebview }) => {
-          getCurrentWebview()
-            .onDragDropEvent((event) => {
-              const payload = event.payload;
-              if (payload.type === "enter" || payload.type === "over") {
-                setIsDragging(true);
-              } else if (payload.type === "leave") {
-                setIsDragging(false);
-              } else if (payload.type === "drop") {
-                setIsDragging(false);
-                const paths = payload.paths;
-                if (paths && paths.length > 0 && paths[0].toLowerCase().endsWith(".pdf")) {
-                  void handleFile(paths[0]);
-                }
-              }
-            })
-            .then((fn) => {
-              unlisten = fn;
-            });
-        })
-        .catch(() => {
-          /* 非 Tauri 环境忽略 */
-        });
-    }
-    return () => unlisten?.();
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    const onDrop = (e: Event) => {
+      setIsDragging(false);
+      const path = (e as CustomEvent<string>).detail;
+      if (path && path.toLowerCase().endsWith(".pdf")) {
+        void handleFile(path);
+      }
+    };
+    const onDragEnter = () => setIsDragging(true);
+    const onDragEnd = () => setIsDragging(false);
+    window.addEventListener("tauri-file-drop", onDrop);
+    window.addEventListener("tauri-file-drag", onDragEnter);
+    window.addEventListener("tauri-file-drag-end", onDragEnd);
+    return () => {
+      window.removeEventListener("tauri-file-drop", onDrop);
+      window.removeEventListener("tauri-file-drag", onDragEnter);
+      window.removeEventListener("tauri-file-drag-end", onDragEnd);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
