@@ -293,15 +293,21 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
   // 拖选（WPS 式几何选区，实验页验证于 2026-09-28）：文字层 span 绝对定位，
   // 浏览器默认拖选在空白落点（栏间/行距/页边距）无法几何映射终点，按 DOM 序
   // 乱卷（跑飞 + 拖动中闪烁的根源）——完全接管手势：锚点与终点都由指针坐标
-  // 几何映射成「span + 字符 offset」，选区 = 两者之间阅读序全含（dual 页文字
-  // 层 DOM 序即阅读序：每页左栏原文块在前、右栏译文块在后，实验确认）。
-  // 语义与标准 PDF 阅读器（WPS/Acrobat）一致：
-  // - 栏内拖选 = 纯该栏，字符级精确（起点行从按下的字起、终点行到滑到的字
-  //   止，行尾空格不吃——高亮不溢出到空白）；
-  // - 跨页拖选 = 本页剩余 + 下页左栏全选 + 下页右栏到落点（引擎原生选区不
-  //   支持多段，阅读序单 Range 是上限最优解）；
-  // - 高亮与 Ctrl+C 仍是原生 selection（所见即所得）；双击选词（中文无空格
-  //   整段、英文按词）、单击收起、Escape 清除。
+  // 几何映射成「span + 字符 offset」。落点映射 v2 为页面+半区感知（v1 全局
+  // 最近 span，指针穿栏间缝/拖过本栏文字尽头时会意外跳到对侧栏，选区瞬间
+  // 膨胀成整页——用户实测）：
+  // - 定页（指针 y 所在渲染页带内，页外取最近页）→ 定侧（x < 本页中线 →
+  //   左栏）→ 本侧池内最近 span；
+  // - 锚点不跨侧：按下在哪半栏锚点就在哪半栏，空白按下不漂移；
+  // - 终点越出本侧文字范围（上/下超过 1.5 行高）时按阅读流处理：对侧在该
+  //   高度有文字则续入对栏（本栏拖到底自动接上译文栏），整页文字都在一侧
+  //   则封顶本页阅读序首/末 span（拖到页底空白不误卷下一页）；
+  // - 选区 = 锚点/终点之间阅读序全含（dual 页文字层 DOM 序即阅读序：每页
+  //   左栏原文块在前、右栏译文块在后，实验确认）——刻意拖过中线/跨页 =
+  //   「本栏剩余 + 对栏从头到落点」（WPS 语义，用户确认保留）。
+  // 高亮与 Ctrl+C 仍是原生 selection；双击选词（中文整段英文按词）、单击
+  // 收起、Escape 清除。页索引按手势重建（缩放重渲会整页替换 span，连接性
+  // 校验失效即重建）。
   useEffect(() => {
     const root = wrapRef.current;
     if (!root) return;
@@ -314,16 +320,61 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
     let anchor: { node: Text; offset: number } | null = null;
     let focus: { node: Text; offset: number } | null = null;
 
-    const spans = () => [...root.querySelectorAll<Element>(".textLayer span")];
+    type Pg = {
+      layer: Element;
+      L: Element[];
+      R: Element[];
+      first: Element;
+      last: Element;
+    };
+    let pagesCache: Pg[] | null = null;
+    const buildIndex = () => {
+      const list: Pg[] = [];
+      for (const layer of root.querySelectorAll(".textLayer")) {
+        const spans = [...layer.querySelectorAll<Element>("span")].filter(
+          (s) => (s.textContent ?? "").length > 0,
+        );
+        if (!spans.length) continue;
+        const lr = layer.getBoundingClientRect();
+        const midX = lr.left + lr.width / 2;
+        const L: Element[] = [];
+        const R: Element[] = [];
+        for (const s of spans) {
+          const r = s.getBoundingClientRect();
+          // 栏判定边缘优先（左栏行止于中线前、右栏行起于中线后）；跨中线
+          // 宽盒（免责声明等整行拉伸 span，实测 left 可达 -162）退回中心
+          const side: "L" | "R" =
+            r.right <= midX + 1
+              ? "L"
+              : r.left >= midX - 1
+                ? "R"
+                : r.left + r.width / 2 < midX
+                  ? "L"
+                  : "R";
+          (side === "L" ? L : R).push(s);
+        }
+        list.push({ layer, L, R, first: spans[0], last: spans[spans.length - 1] });
+      }
+      pagesCache = list;
+      return list;
+    };
+    const pages = () => {
+      if (pagesCache) {
+        if (pagesCache.some((p) => !p.first.isConnected)) pagesCache = null;
+        else if (pagesCache.length !== root.querySelectorAll(".textLayer").length)
+          pagesCache = null;
+      }
+      return pagesCache ?? buildIndex();
+    };
     const dist = (r: DOMRect, x: number, y: number) =>
       Math.hypot(
         Math.max(r.left - x, 0, x - r.right),
         Math.max(r.top - y, 0, y - r.bottom),
       );
-    const nearestSpan = (x: number, y: number) => {
+    const nearestIn = (pool: Element[], x: number, y: number) => {
       let best: Element | null = null;
       let bestD = Infinity;
-      for (const s of spans()) {
+      for (const s of pool) {
         const d = dist(s.getBoundingClientRect(), x, y);
         if (d < bestD) {
           bestD = d;
@@ -332,11 +383,68 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
       }
       return { best, bestD };
     };
-    // 指针 → 文字位置：最近 span + 字符 offset（二分：最大的 i 使 [0,i) 的
-    // 右缘 <= x）。终点落在尾部空格区时收紧到末个非空格字符（高亮不打到
-    // 行尾空白）；竖排/空文本退化为 span 边界。
-    const posAt = (x: number, y: number): { node: Text; offset: number } | null => {
-      const { best } = nearestSpan(x, y);
+    const nearestSpan = (x: number, y: number) =>
+      nearestIn(
+        pages().flatMap((p) => [...p.L, ...p.R]),
+        x,
+        y,
+      );
+    // 指针 → 文字位置：定页定侧后本侧池内最近 span + 字符 offset（二分：最大
+    // 的 i 使 [0,i) 右缘 <= x）。终点落在尾部空格区时收紧到末个非空格字符；
+    // 竖排/空文本退化为 span 边界。
+    const posAt = (
+      x: number,
+      y: number,
+      mode: "anchor" | "focus",
+    ): { node: Text; offset: number } | null => {
+      const list = pages();
+      if (!list.length) return null;
+      let pg: Pg | null = null;
+      for (const p of list) {
+        const r = p.layer.getBoundingClientRect();
+        if (y >= r.top - 24 && y <= r.bottom + 24) {
+          pg = p;
+          break;
+        }
+      }
+      if (!pg) {
+        let bd = Infinity;
+        for (const p of list) {
+          const r = p.layer.getBoundingClientRect();
+          const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+          if (d < bd) {
+            bd = d;
+            pg = p;
+          }
+        }
+      }
+      if (!pg) return null;
+      const lr = pg.layer.getBoundingClientRect();
+      const midX = lr.left + lr.width / 2;
+      const side = x < midX ? "L" : "R";
+      let pool = side === "L" ? pg.L : pg.R;
+      if (!pool.length) pool = [...pg.L, ...pg.R];
+      let { best } = nearestIn(pool, x, y);
+      if (mode === "focus" && best) {
+        // 终点越出本侧文字范围 → 阅读流延续（对栏同高度有文字）或封顶本页
+        const rs = pool.map((s) => s.getBoundingClientRect());
+        const top = Math.min(...rs.map((r) => r.top));
+        const bottom = Math.max(...rs.map((r) => r.bottom));
+        const lineH = Math.max(8, ...rs.map((r) => r.height));
+        if (y < top - lineH * 1.5 || y > bottom + lineH * 1.5) {
+          const other = side === "L" ? pg.R : pg.L;
+          let flow: Element | null = null;
+          if (other.length) {
+            const o = nearestIn(other, x, y);
+            if (o.best) {
+              const orb = o.best.getBoundingClientRect();
+              if (y >= orb.top - lineH * 1.5 && y <= orb.bottom + lineH * 1.5)
+                flow = o.best;
+            }
+          }
+          best = flow ?? (y < top ? pg.first : pg.last);
+        }
+      }
       const first = best?.firstChild;
       if (!first || first.nodeType !== 3) return null;
       const t = first as Text;
@@ -392,14 +500,15 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
       e.preventDefault(); // 接管：原生拖选不启动（其中间态是闪烁/跑飞根源）
       dragging = true;
       moved = false;
-      anchor = focus = posAt(e.clientX, e.clientY);
+      pagesCache = null; // 新手势重建页索引（懒渲染页面可能新增）
+      anchor = focus = posAt(e.clientX, e.clientY, "anchor");
     };
     const onMove = (e: PointerEvent) => {
       lastX = e.clientX;
       lastY = e.clientY;
       if (!dragging) return;
       if (Math.hypot(e.clientX - downX, e.clientY - downY) > 3) moved = true;
-      focus = posAt(e.clientX, e.clientY);
+      focus = posAt(e.clientX, e.clientY, "focus");
       apply();
     };
     const onUp = () => {
@@ -412,13 +521,13 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
     };
     const onScroll = () => {
       if (!dragging) return;
-      focus = posAt(lastX, lastY); // 滚轮下内容移动，用最后指针坐标重算终点
+      focus = posAt(lastX, lastY, "focus"); // 滚轮下内容移动，用最后指针坐标重算终点
       apply();
     };
     const onDbl = (e: MouseEvent) => {
       if (!nearText(e.clientX, e.clientY)) return;
       e.preventDefault();
-      const p = posAt(e.clientX, e.clientY);
+      const p = posAt(e.clientX, e.clientY, "anchor");
       if (!p) return;
       const s = p.node.data;
       const ws = (c: string) => /\s/.test(c);
