@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { TextLayer } from "pdfjs-dist";
 import { usePdfStore } from "../stores/pdfStore";
 import { useBabelDocStore } from "../stores/babeldocStore";
 import { useUiStore, effectiveZoom } from "../stores/uiStore";
@@ -329,7 +330,9 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
   );
 }
 
-/** 单页懒渲染 canvas：进入视口附近才 raster，缩放变化重渲染 */
+/** 单页懒渲染 canvas + 透明文本层：进入视口附近才 raster，缩放变化重渲染。
+ *  文本层与 canvas 像素对齐（透明文字），使排版对照可以拖选/复制——
+ *  BabelDOC 产物是排版 PDF，canvas 栅格图本身无文字可选 */
 function LazyPageCanvas({
   pdf,
   pageNo,
@@ -341,6 +344,7 @@ function LazyPageCanvas({
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const textRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -358,6 +362,7 @@ function LazyPageCanvas({
   useEffect(() => {
     if (!visible || !pdf) return;
     let cancelled = false;
+    let textLayer: TextLayer | null = null;
     (async () => {
       try {
         const page = await pdf.getPage(pageNo);
@@ -372,21 +377,41 @@ function LazyPageCanvas({
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const container = textRef.current;
+        if (!container || cancelled) return;
+        // 容器与 canvas CSS 尺寸重合（绝对定位于其上），span 坐标系 =
+        // CSS 像素 viewport，与栅格逐字对齐
+        container.replaceChildren();
+        container.style.width = `${Math.floor(vp.width / dpr)}px`;
+        container.style.height = `${Math.floor(vp.height / dpr)}px`;
+        textLayer = new TextLayer({
+          textContentSource: page.streamTextContent(),
+          container,
+          viewport: page.getViewport({ scale }),
+        });
+        await textLayer.render();
       } catch {
         /* 渲染中断（快速缩放/卸载）忽略 */
       }
     })();
     return () => {
       cancelled = true;
+      textLayer?.cancel();
     };
   }, [visible, pdf, pageNo, scale]);
 
   return (
-    <div ref={wrapRef} className="mb-4 flex justify-center">
+    <div ref={wrapRef} className="relative mb-4 flex justify-center">
       <canvas
         ref={canvasRef}
         className="bg-white shadow-sm"
         style={{ display: visible ? undefined : "none", width: "100%" }}
+      />
+      <div
+        ref={textRef}
+        className="textLayer absolute left-1/2 top-0 -translate-x-1/2"
+        style={{ display: visible ? undefined : "none" }}
+        aria-hidden="true"
       />
     </div>
   );

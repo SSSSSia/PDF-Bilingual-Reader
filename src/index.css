@@ -175,3 +175,35 @@
     @apply mb-1 block text-sm font-medium text-slate-600 dark:text-slate-300;
   }
 }
+
+/* pdfjs 透明文本层（排版对照视图 DualPdfPage）：span 与 canvas 像素对齐、
+   文字透明，仅供鼠标拖选/复制；选区高亮用交互蓝（比全站 ::selection 深，
+   透明字下要能看清选中范围） */
+.textLayer {
+  position: absolute;
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+}
+
+.textLayer span,
+.textLayer br {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  unicode-bidi: isolate;
+}
+
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+
+.textLayer ::selection {
+  background: rgb(59 130 246 / 0.35);
+}
