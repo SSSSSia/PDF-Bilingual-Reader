@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { TextLayer } from "pdfjs-dist";
 import { usePdfStore } from "../stores/pdfStore";
@@ -380,11 +380,9 @@ function LazyPageCanvas({
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
         const container = textRef.current;
         if (!container || cancelled) return;
-        // 容器与 canvas CSS 尺寸重合（绝对定位于其上），span 坐标系 =
-        // CSS 像素 viewport，与栅格逐字对齐
+        // 容器宽高由 TextLayer.render 自理（基于 --total-scale-factor，
+        // 见 JSX 贴合层注释），这里只清旧 span
         container.replaceChildren();
-        container.style.width = `${Math.floor(vp.width / dpr)}px`;
-        container.style.height = `${Math.floor(vp.height / dpr)}px`;
         try {
           textLayer = new TextLayer({
             textContentSource: page.streamTextContent(),
@@ -410,18 +408,34 @@ function LazyPageCanvas({
   }, [visible, pdf, pageNo, scale]);
 
   return (
-    <div ref={wrapRef} className="relative mb-4 flex justify-center">
-      <canvas
-        ref={canvasRef}
-        className="bg-white shadow-sm"
-        style={{ display: visible ? undefined : "none", width: "100%" }}
-      />
+    <div ref={wrapRef} className="mb-4 flex justify-center">
+      {/* 贴合层：宽度由 canvas 撑起；pdfjs v6 TextLayer.render 会整体
+          重写 textLayer 的 inline style，其宽高公式依赖 --total-scale-factor
+          等变量——变量必须挂在 textLayer 之外（本层），经继承生效，
+          挂在 textLayer 自身会被 render() 抹掉（实测文字层整体塌缩错位、
+          有 span 但全部偏出画布，拖选无命中） */}
       <div
-        ref={textRef}
-        className="textLayer absolute left-1/2 top-0 -translate-x-1/2"
-        style={{ display: visible ? undefined : "none" }}
-        aria-hidden="true"
-      />
+        className="relative inline-block"
+        style={
+          {
+            "--total-scale-factor": String(scale),
+            "--scale-round-x": "1px",
+            "--scale-round-y": "1px",
+          } as CSSProperties
+        }
+      >
+        <canvas
+          ref={canvasRef}
+          className="bg-white shadow-sm"
+          style={{ display: visible ? undefined : "none" }}
+        />
+        <div
+          ref={textRef}
+          className="textLayer absolute inset-0"
+          style={{ display: visible ? undefined : "none" }}
+          aria-hidden="true"
+        />
+      </div>
     </div>
   );
 }
