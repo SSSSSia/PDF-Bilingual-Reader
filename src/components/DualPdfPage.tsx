@@ -290,51 +290,184 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
     return () => ro.disconnect();
   }, []);
 
-  // 选区修剪：文字层 span 是绝对定位，拖选落点在空白处时浏览器无法按
-  // 几何映射终点，按 DOM 序把对侧栏（原文）或相邻页整段卷入——复制出
-  // 英中重复内容。对照页左右互为译文、跨栏选择无意义：mouseup 后按
-  // 锚点所在栏保留（跨页时每页各自按本页中线判定同侧），剔除对侧；
-  // 正常栏内选择两端本就落在保留栏，零扰动。
+  // 拖选钳制（对照栏内选区防跑飞）：文字层 span 绝对定位，拖选落点在空白处
+  // （栏间/行距/页边距）时浏览器无法按几何映射终点，按 DOM 序把对侧栏或相邻
+  // 页整段卷入——高亮越界、复制出英中重复内容。对照页左右互为译文，跨栏
+  // 选择无意义：全程只保留锚点（按下处）所在栏。
+  // 机制（实验页验证于 2026-09-28）：
+  // - selectionchange 实时钳制 + mouseup 兜底，拖动中即修，松手后保证正确；
+  // - 跑飞判定看**全部相交 span**（上一版只看选区两端点，端点都在译文 span
+  //   而中间夹了原文块时被绕过——用户实测残留左侧高亮条）；
+  // - 落点空白时终点由指针坐标几何取「最近同侧 span」重建，不再信任浏览器
+  //   映射出的 DOM 终点（曾一路卷到层首）；
+  // - WebView2/Chromium 的 addRange 多段选区实测被替换（rangeCount 恒 1），
+  //   单 Range 跨页必卷入下一页左栏块 → 终点封顶在锚点所在页；
+  // - 空白处起拖时浏览器把 anchorNode 记成容器 DIV → 用按下点最近 span 兜底
+  //   认定锚点栏；正常栏内拖选/双击选词不跨栏 → 零扰动（clean 短路）。
   useEffect(() => {
-    const trim = () => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-      const root = wrapRef.current;
-      if (!root) return;
-      const elOf = (n: Node | null): Element | null =>
-        n ? (n.nodeType === 3 ? n.parentElement : (n as Element)) : null;
-      const anchorEl = elOf(sel.anchorNode);
-      if (!anchorEl || !root.contains(anchorEl)) return;
-      const anchorSpan = anchorEl.closest("span");
-      const layer = anchorEl.closest(".textLayer");
-      if (!anchorSpan || !layer) return;
-      const midX =
-        layer.getBoundingClientRect().left + layer.getBoundingClientRect().width / 2;
-      const sideOf = (el: Element): "L" | "R" => {
-        const r = el.getBoundingClientRect();
-        return r.left + r.width / 2 < midX ? "L" : "R";
-      };
-      const keep = sideOf(anchorSpan);
-      const range = sel.getRangeAt(0);
-      const keepSpans = [
-        ...root.querySelectorAll<Element>(".textLayer span"),
-      ].filter((s) => range.intersectsNode(s) && sideOf(s) === keep);
-      if (keepSpans.length === 0) return;
-      const startEl = elOf(range.startContainer);
-      const endEl = elOf(range.endContainer);
-      const keepStart = startEl ? keepSpans.includes(startEl) : false;
-      const keepEnd = endEl ? keepSpans.includes(endEl) : false;
-      if (keepStart && keepEnd) return;
-      const trimmed = document.createRange();
-      if (keepStart) trimmed.setStart(range.startContainer, range.startOffset);
-      else trimmed.setStartBefore(keepSpans[0]);
-      if (keepEnd) trimmed.setEnd(range.endContainer, range.endOffset);
-      else trimmed.setEndAfter(keepSpans[keepSpans.length - 1]);
-      sel.removeAllRanges();
-      sel.addRange(trimmed);
+    let px = 0;
+    let py = 0;
+    let downX = -1;
+    let downY = -1;
+    let applying = false;
+    const sideCache = new WeakMap<Element, "L" | "R">();
+    const elOf = (n: Node | null): Element | null =>
+      n ? (n.nodeType === 3 ? n.parentElement : (n as Element)) : null;
+    const sideOf = (sp: Element): "L" | "R" => {
+      const cached = sideCache.get(sp);
+      if (cached) return cached;
+      const layer = sp.closest(".textLayer");
+      const lr = layer?.getBoundingClientRect();
+      const r = sp.getBoundingClientRect();
+      // 先看边缘（左栏行止于中线前、右栏行起于中线后），跨中线的宽盒
+      // （免责声明等整行拉伸 span，实测 left 可达 -162）退回中心判定
+      const midX = lr ? lr.left + lr.width / 2 : 0;
+      const side: "L" | "R" =
+        lr && r.right <= midX + 1
+          ? "L"
+          : lr && r.left >= midX - 1
+            ? "R"
+            : r.left + r.width / 2 < midX
+              ? "L"
+              : "R";
+      sideCache.set(sp, side);
+      return side;
     };
-    document.addEventListener("mouseup", trim);
-    return () => document.removeEventListener("mouseup", trim);
+    const dist = (r: DOMRect, x: number, y: number) =>
+      Math.hypot(
+        Math.max(r.left - x, 0, x - r.right),
+        Math.max(r.top - y, 0, y - r.bottom),
+      );
+    const nearest = (x: number, y: number, pool: Element[]) => {
+      let best: Element | null = null;
+      let bestD = Infinity;
+      for (const s of pool) {
+        const d = dist(s.getBoundingClientRect(), x, y);
+        if (d < bestD) {
+          bestD = d;
+          best = s;
+        }
+      }
+      return { best, bestD };
+    };
+    const clamp = () => {
+      if (applying) return;
+      const sel = window.getSelection();
+      const root = wrapRef.current;
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !root) return;
+      const spans = [...root.querySelectorAll<Element>(".textLayer span")];
+      if (spans.length === 0) return;
+      // 锚点 span：选区锚点不在 span 内（空白起拖，浏览器把 anchorNode 记成
+      // 容器 DIV）时，用按下点最近 span 兜底；离任何 span 都远则非文字手势
+      let anchorSpan: Element | null = null;
+      const anchorEl = elOf(sel.anchorNode);
+      if (anchorEl && root.contains(anchorEl)) {
+        anchorSpan = anchorEl.closest("span");
+      }
+      if (!anchorSpan) {
+        if (downX < 0) return;
+        const near = nearest(downX, downY, spans);
+        if (!near.best || near.bestD > 80) return;
+        anchorSpan = near.best;
+      }
+      const layer = anchorSpan.closest(".textLayer");
+      if (!layer) return;
+      const keep = sideOf(anchorSpan);
+      // 跑飞判定：选区相交的对侧 span（全集扫描，非仅端点）；与文字层无任何
+      // 相交的选区（别处 UI 的选择）放行
+      let runaway = false;
+      let anyHit = false;
+      for (const s of spans) {
+        let hit = false;
+        for (let i = 0; i < sel.rangeCount; i++) {
+          if (sel.getRangeAt(i).intersectsNode(s)) {
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) continue;
+        anyHit = true;
+        if (sideOf(s) !== keep) {
+          runaway = true;
+          break;
+        }
+      }
+      if (!anyHit || !runaway) return;
+      const pageKept = spans.filter(
+        (s) => sideOf(s) === keep && s.closest(".textLayer") === layer,
+      );
+      const { best } = nearest(px, py, pageKept);
+      if (!best) return;
+      const ai = pageKept.indexOf(anchorSpan);
+      const bi = pageKept.indexOf(best);
+      if (ai < 0 || bi < 0) return;
+      let lo = Math.min(ai, bi);
+      let hi = Math.max(ai, bi);
+      // 连通窗口收缩：目标区间里相邻保留 span 之间夹了对侧内容时（非 blocked
+      // 排版兜底；br 是零宽换行不阻断），收缩到锚点所在最大连通窗口
+      const keptSet = new Set(pageKept);
+      const adjacent = (a: Element, b: Element) => {
+        if (a.parentElement !== b.parentElement) return false;
+        const sibs = a.parentElement!.children;
+        const ia = Array.prototype.indexOf.call(sibs, a);
+        const ib = Array.prototype.indexOf.call(sibs, b);
+        for (let j = ia + 1; j < ib; j++) {
+          if (!keptSet.has(sibs[j]) && sibs[j].tagName !== "BR") return false;
+        }
+        return true;
+      };
+      let contigLo = ai;
+      while (contigLo > 0 && adjacent(pageKept[contigLo - 1], pageKept[contigLo])) {
+        contigLo--;
+      }
+      let contigHi = ai;
+      while (
+        contigHi < pageKept.length - 1 &&
+        adjacent(pageKept[contigHi], pageKept[contigHi + 1])
+      ) {
+        contigHi++;
+      }
+      if (lo < contigLo || hi > contigHi) {
+        lo = contigLo;
+        hi = contigHi;
+      }
+      const run = pageKept.slice(lo, hi + 1);
+      const rg = document.createRange();
+      rg.setStartBefore(run[0]);
+      rg.setEndAfter(run[run.length - 1]);
+      applying = true;
+      try {
+        sel.removeAllRanges();
+        sel.addRange(rg);
+      } finally {
+        applying = false;
+      }
+    };
+    const onDown = (e: PointerEvent) => {
+      downX = e.clientX;
+      downY = e.clientY;
+      px = e.clientX;
+      py = e.clientY;
+    };
+    const onMove = (e: PointerEvent) => {
+      px = e.clientX;
+      py = e.clientY;
+    };
+    const onUp = (e: MouseEvent) => {
+      px = e.clientX;
+      py = e.clientY;
+      clamp();
+    };
+    document.addEventListener("pointerdown", onDown, { passive: true });
+    document.addEventListener("pointermove", onMove, { passive: true });
+    document.addEventListener("selectionchange", clamp);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("selectionchange", clamp);
+      document.removeEventListener("mouseup", onUp);
+    };
   }, []);
 
   const pageCount = pdf?.numPages ?? 0;
