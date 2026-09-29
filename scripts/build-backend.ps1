@@ -80,6 +80,12 @@ if (Test-Path $outDir) {
 # 模型在 onefile 冻结环境段错误（2026-09-13 打包版白屏根因），且 textlayer
 # 已显式 use_layout(False)——排除后 pymupdf4llm 导入时 ImportError 自动落
 # classic 管线，与 dev 行为一致
+# 子进程 worker 脚本必须以真实文件随包（babeldoc-runtime 的 python 直接按
+# 路径拉起执行；PyInstaller 只把模块编译进 PYZ，冻结后 __file__ 指向
+# _internal 下并不存在的 .py——v0.12.0~v0.15.0 安装版排版对照
+# 「can't open file babeldoc_worker.py」即此根因，dev 不受影响）。
+# dest 为 _internal 下相对目录，与 export/babeldoc_export.py、
+# ocr/layout_model.py 的 __file__ 相对解析严丝合缝。
 $ErrorActionPreference = "Continue"
 Write-Host "[4/5] 正在打包后端，请稍候（约 1-3 分钟）..."
 & $Python -m PyInstaller `
@@ -95,6 +101,8 @@ Write-Host "[4/5] 正在打包后端，请稍候（约 1-3 分钟）..."
     --hidden-import uvicorn.lifespan.on `
     --collect-all uvicorn `
     --collect-all PyMuPDF `
+    --add-data "$($root)\backend\export\babeldoc_worker.py;export" `
+    --add-data "$($root)\backend\ocr\layout_worker.py;ocr" `
     --exclude-module pymupdf.layout `
     $backendEntry
 $pyiExit = $LASTEXITCODE
@@ -108,6 +116,10 @@ $builtExe = Join-Path $outDir "pdf-backend-od.exe"
 if (-not (Test-Path $builtExe)) { throw "未找到产物: $builtExe" }
 Rename-Item -Path $builtExe -NewName "pdf-backend.exe"
 if (-not (Test-Path $outExe)) { throw "未找到产物: $outExe" }
+# worker 脚本随包断言：--add-data 未生效就在这里爆炸，别让它溜进发行版
+foreach ($rel in @("_internal\export\babeldoc_worker.py", "_internal\ocr\layout_worker.py")) {
+    if (-not (Test-Path (Join-Path $outDir $rel))) { throw "产物缺 worker 脚本: $rel（--add-data 未生效？）" }
+}
 $sizeMB = [math]::Round(((Get-ChildItem $outDir -Recurse | Measure-Object Length -Sum).Sum) / 1MB, 2)
 Write-Host "完成: $outExe（onedir 全目录 $sizeMB MB）" -ForegroundColor Green
 Write-Host "提示: 之后执行 npm run tauri build 即可产出自包含的 exe。"
