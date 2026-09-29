@@ -166,6 +166,8 @@ class LayoutProvider:
 
     async def _spawn(self, python_exe: str, pages: list[int]):
         pages_arg = ",".join(str(p) for p in pages)
+        # 与导出 worker 同款：强制 UTF-8 stdio，stderr/NDJSON 不随系统 ANSI 漂
+        env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
         return await asyncio.create_subprocess_exec(
             python_exe,
             _worker_path(),
@@ -173,6 +175,7 @@ class LayoutProvider:
             pages_arg,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
     # ── stdout NDJSON 消费 ──────────────────────────────────────────

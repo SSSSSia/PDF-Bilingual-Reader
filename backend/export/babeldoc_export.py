@@ -280,7 +280,9 @@ async def start_export(
     # 卡在某个百分比。真实论文 1h 不完成即此根因，实证
     # cache.v1.db-wal 在 19:41 后停止增长而进程存活）。
     log_path = os.path.join(out_dir, "worker.log")
-    log_fh = open(log_path, "a", encoding="utf-8")
+    # 每次尝试截断重写（原为追加）：报错尾片段只含本次内容——追加模式下
+    # 重试会把上次尝试的同款错误拼进 message（用户看到「重复两遍且开头截断」）
+    log_fh = open(log_path, "w", encoding="utf-8")
     cmd = [
         runtime_python,
         _worker_path(),
@@ -295,11 +297,17 @@ async def start_export(
         "--lang-out", "zh",
     ]
     try:
+        # 子进程强制 UTF-8 stdio：随包 runtime python 缺省按 ANSI（中文系统
+        # GBK）写 stderr，而本端按 UTF-8 解码 worker.log——安装目录含中文时
+        # 诊断信息整行变 U+FFFD（用户看到的 ◆◆◆）；顺带固定 stdout NDJSON
+        # 的中文不走管道 locale 编码。
+        child_env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=log_fh,
             cwd=_project_root(),
+            env=child_env,
         )
     except OSError as e:
         log_fh.close()
@@ -401,13 +409,32 @@ async def _pump(job: dict, proc: subprocess.Popen) -> None:
 
 
 def _read_log_tail(job: dict, limit: int = 400) -> str:
-    """worker.log 末尾片段（诊断用；stderr 已改落盘不再走 PIPE）。"""
+    """worker.log 末尾片段（诊断用；stderr 已改落盘不再走 PIPE）。
+
+    bytes 解码 UTF-8 优先、GBK 回退：worker 已强制 PYTHONUTF8，但 python.exe
+    极早期报错/CRT 输出仍可能是 ANSI（中文系统 GBK），按 UTF-8 硬解会整行
+    U+FFFD；seek 边界切断多字节字符时先跳过头部残缺字节再试。
+    """
     try:
-        with open(job["log_path"], encoding="utf-8", errors="replace") as f:
+        with open(job["log_path"], "rb") as f:
             f.seek(0, os.SEEK_END)
             size = f.tell()
             f.seek(max(0, size - 4000))
-            return f.read()[-limit:].replace("\n", " ")
+            raw = f.read()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+            for skip in (1, 2, 3):
+                try:
+                    text = raw[skip:].decode("utf-8")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if text is None:
+                text = raw.decode("gbk", "replace")
+        # bytes 读没有 universal newlines，\r\n 需手动归一（原文本模式自带）
+        return text[-limit:].replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
     except OSError:
         return ""
 
