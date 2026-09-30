@@ -34,7 +34,6 @@ export default function DualPdfPage() {
   } = usePdfStore();
   const bdoc = useBabelDocStore();
   const navigate = useNavigate();
-  const zoomRef = useZoomWheel<HTMLDivElement>();
 
   // 本页归属文档的路径：活跃会话的文件路径；F5 重接管时会话为空 → 回落
   // 任务自带路径（此时两者同源）。会话存在但源文件缺失 → 空串。
@@ -270,11 +269,15 @@ export default function DualPdfPage() {
   return <DualPdfViewer dualPath={dualPath} />;
 }
 
-/** dual PDF 连续渲染：fit-width × zoom，懒渲染（IntersectionObserver 预载 600px） */
+/** dual PDF 连续渲染：fit-width × zoom，懒渲染（IntersectionObserver 预载 600px）。
+ * 缩放两相：liveZoom 驱动页面列宽与位图 transform 拉伸（实时跟手），
+ * renderScale（定稿值）驱动 canvas 重栅格——停顿后视口附近页变清晰 */
 function DualPdfViewer({ dualPath }: { dualPath: string }) {
   const zoomRaw = useUiStore((s) => s.zoom);
   const readerMode = useUiStore((s) => s.readerMode);
-  const zoom = effectiveZoom(zoomRaw, readerMode);
+  const liveZoom = effectiveZoom(zoomRaw, readerMode);
+  // renderZoom 为 null（本会话尚未缩放过/重置后）→ 定稿值就是当前实时值
+  const renderScale = useUiStore((s) => s.renderZoom) ?? liveZoom;
   const zoomRef = useZoomWheel<HTMLDivElement>();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [wrapW, setWrapW] = useState(0);
@@ -582,14 +585,17 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
         {pdf && pageCount > 0 && (
           <div
             className="mx-auto px-4 pb-16 pt-3"
-            style={{ width: wrapW > 0 ? (wrapW - 48) * zoom + 32 : undefined }}
+            style={{
+              width: wrapW > 0 ? (wrapW - 48) * liveZoom + 32 : undefined,
+            }}
           >
             {Array.from({ length: pageCount }, (_, i) => (
               <LazyPageCanvas
                 key={i}
                 pdf={pdf}
                 pageNo={i + 1}
-                scale={zoom}
+                scale={renderScale}
+                liveZoom={liveZoom}
               />
             ))}
           </div>
@@ -699,26 +705,39 @@ function removeGhostSpans(
 /** 单页懒渲染 canvas + 透明文本层：进入视口附近才 raster，缩放变化重渲染。
  *  文本层与 canvas 像素对齐（透明文字），使排版对照可以拖选/复制——
  *  BabelDOC 产物是排版 PDF，canvas 栅格图本身无文字可选 */
+
 function LazyPageCanvas({
   pdf,
   pageNo,
   scale,
+  liveZoom,
 }: {
   pdf: any;
   pageNo: number;
+  /** 定稿渲染值（uiStore.renderZoom 相），手势期间不变 */
   scale: number;
+  /** 实时值（uiStore.zoom 相）：驱动位图 transform 拉伸 */
+  liveZoom: number;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(false);
+  // 最近一次渲染落位时的 CSS 尺寸与所用 scale：手势拉伸 factor 的基准。
+  // 与 canvas CSS 同步设置（渲染启动时），保证 transform 基准恒与位图一致
+  const [rendered, setRendered] = useState<{
+    w: number;
+    h: number;
+    scale: number;
+  } | null>(null);
 
+  // 可见性双向跟踪：滚远即停绘（effect 跳过，保留旧位图继续参与布局），
+  // 回近才以当前定稿值重绘——单向闩锁时代每次缩放全量重绘已浏览页
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const io = new IntersectionObserver(
-      (entries) =>
-        entries.forEach((e) => e.isIntersecting && setVisible(true)),
+      (entries) => entries.forEach((e) => setVisible(e.isIntersecting)),
       { rootMargin: "600px 0px" }
     );
     io.observe(el);
@@ -728,6 +747,8 @@ function LazyPageCanvas({
   useEffect(() => {
     if (!visible || !pdf) return;
     let cancelled = false;
+    let renderTask: { promise: Promise<unknown>; cancel: () => void } | null =
+      null;
     let textLayer: TextLayer | null = null;
     (async () => {
       try {
@@ -738,11 +759,22 @@ function LazyPageCanvas({
         if (!canvas || cancelled) return;
         canvas.width = Math.floor(vp.width);
         canvas.height = Math.floor(vp.height);
-        canvas.style.width = `${Math.floor(vp.width / dpr)}px`;
-        canvas.style.height = `${Math.floor(vp.height / dpr)}px`;
+        const cssW = Math.floor(vp.width / dpr);
+        const cssH = Math.floor(vp.height / dpr);
+        canvas.style.width = `${cssW}px`;
+        canvas.style.height = `${cssH}px`;
+        // 拉伸基准随位图同步落位（渲染启动即更新，此刻 liveZoom==scale，
+        // factor 收敛为 1，无视觉跳变；位图重绘期间的短暂空白与旧版一致）
+        setRendered((r) =>
+          r && r.w === cssW && r.h === cssH && r.scale === scale
+            ? r
+            : { w: cssW, h: cssH, scale }
+        );
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        const rt = page.render({ canvasContext: ctx, viewport: vp });
+        renderTask = rt;
+        await rt.promise;
         const container = textRef.current;
         if (!container || cancelled) return;
         // 容器宽高由 TextLayer.render 自理（基于 --total-scale-factor，
@@ -783,12 +815,22 @@ function LazyPageCanvas({
     })();
     return () => {
       cancelled = true;
+      renderTask?.cancel?.();
       textLayer?.cancel();
     };
   }, [visible, pdf, pageNo, scale]);
 
+  // 手势拉伸：位图与文字层整体 transform 缩放（origin 顶心，页面列已按
+  // liveZoom 定宽，视觉居中不变）；wrapper 显式高度占住缩放后的布局空间，
+  // 后续页面不被叠压。factor=1（定稿/未渲染）时完全还原
+  const factor = rendered ? liveZoom / rendered.scale : 1;
+
   return (
-    <div ref={wrapRef} className="mb-4 flex justify-center">
+    <div
+      ref={wrapRef}
+      className="mb-4 flex justify-center"
+      style={{ height: rendered ? rendered.h * factor : undefined }}
+    >
       {/* 贴合层：宽度由 canvas 撑起；pdfjs v6 TextLayer.render 会整体
           重写 textLayer 的 inline style，其宽高公式依赖 --total-scale-factor
           等变量——变量必须挂在 textLayer 之外（本层），经继承生效，
@@ -801,18 +843,20 @@ function LazyPageCanvas({
             "--total-scale-factor": String(scale),
             "--scale-round-x": "1px",
             "--scale-round-y": "1px",
+            transform: factor !== 1 ? `scale(${factor})` : undefined,
+            transformOrigin: "top center",
           } as CSSProperties
         }
       >
         <canvas
           ref={canvasRef}
           className="bg-white shadow-sm"
-          style={{ display: visible ? undefined : "none" }}
+          style={{ display: rendered || visible ? undefined : "none" }}
         />
         <div
           ref={textRef}
           className="textLayer absolute inset-0"
-          style={{ display: visible ? undefined : "none" }}
+          style={{ display: rendered || visible ? undefined : "none" }}
           aria-hidden="true"
         />
       </div>

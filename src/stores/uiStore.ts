@@ -87,8 +87,15 @@ interface UiState {
   mode: "bilingual" | "inline";
   theme: "light" | "dark";
   readerMode: ReaderMode;
-  /** null = 用户未手动设置过（渲染方按 effectiveZoom 回落形态缺省） */
+  /** null = 用户未手动设置过（渲染方按 effectiveZoom 回落形态缺省）。
+   * 实时值：缩放手势期间逐格更新，驱动 CSS 尺寸即时跟随（canvas 位图
+   * 由浏览器拉伸，零栅格成本） */
   zoom: number | null;
+  /** 定稿渲染值：null = 本会话尚未缩放过（渲染方回落 effectiveZoom）。
+   * 手势开始时冻结为手势前的有效值（canvas 重绘 key 在此，期间不触发），
+   * 停顿 SETTLE_MS 后收敛为最新 zoom 并持久化——「实时拉伸 + 停顿后
+   * 高清重绘」两相化的定稿相 */
+  renderZoom: number | null;
   /** 下一次上传使用的翻译模式（记住上次选择） */
   uploadMode: UploadMode;
   setMode: (mode: "bilingual" | "inline") => void;
@@ -101,11 +108,30 @@ interface UiState {
   setUploadMode: (m: UploadMode) => void;
 }
 
+/** 缩放定稿时延：最后一次缩放变化后等待此时长才触发 pdfjs 重栅格化
+ * 与 localStorage 落盘（栅格化是重活，滚动中的连续步进只做 CSS 拉伸） */
+const ZOOM_SETTLE_MS = 220;
+
+let zoomSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleZoomSettle() {
+  if (zoomSettleTimer !== null) clearTimeout(zoomSettleTimer);
+  zoomSettleTimer = setTimeout(() => {
+    zoomSettleTimer = null;
+    const s = useUiStore.getState();
+    if (s.zoom == null) return;
+    const settled = effectiveZoom(s.zoom, s.readerMode);
+    persistZoom(settled);
+    if (s.renderZoom !== settled) useUiStore.setState({ renderZoom: settled });
+  }, ZOOM_SETTLE_MS);
+}
+
 export const useUiStore = create<UiState>((set) => ({
   mode: "bilingual",
   theme: "light",
   readerMode: "parallel",
   zoom: loadZoom(),
+  renderZoom: null,
   uploadMode: loadUploadMode(),
   setMode: (mode) => set({ mode }),
   setTheme: (theme) => set({ theme }),
@@ -115,11 +141,16 @@ export const useUiStore = create<UiState>((set) => ({
       persistUploadMode(uploadMode);
       return { uploadMode };
     }),
+  // 实时相：立即更新 zoom（CSS 尺寸即时跟随）；renderZoom 冻结在手势前值
+  // （首次步进时捕获），canvas 重绘与落盘都等 ZOOM_SETTLE_MS 停顿后一次完成
   setZoom: (z) =>
-    set(() => {
+    set((s) => {
       const v = clampZoom(z);
-      persistZoom(v);
-      return { zoom: v };
+      scheduleZoomSettle();
+      return {
+        zoom: v,
+        renderZoom: s.renderZoom ?? effectiveZoom(s.zoom, s.readerMode),
+      };
     }),
   // 步进起点：未设置过时从「当前形态缺省」起步（原版 0.7、重排版 1.0），
   // 保证首次 + 得到 0.8/1.1 而不是从硬编码 1 起跳
@@ -127,18 +158,26 @@ export const useUiStore = create<UiState>((set) => ({
     set((s) => {
       const base = s.zoom ?? effectiveZoom(null, s.readerMode);
       const v = clampZoom(base + delta);
-      persistZoom(v);
-      return { zoom: v };
+      scheduleZoomSettle();
+      return {
+        zoom: v,
+        renderZoom: s.renderZoom ?? effectiveZoom(s.zoom, s.readerMode),
+      };
     }),
-  // 重置 = 回到「未设置」态：原版回落 70%、重排版回落 100%，并清除持久化
+  // 重置 = 回到「未设置」态：原版回落 70%、重排版回落 100%，并清除持久化。
+  // 定稿值同步清空 → 渲染方按新回落值重绘；进行中的定稿 timer 作废
   resetZoom: () =>
     set(() => {
+      if (zoomSettleTimer !== null) {
+        clearTimeout(zoomSettleTimer);
+        zoomSettleTimer = null;
+      }
       try {
         localStorage.removeItem(ZOOM_STORAGE_KEY);
       } catch {
         /* 清理失败不影响本会话状态 */
       }
-      return { zoom: null };
+      return { zoom: null, renderZoom: null };
     }),
   toggleTheme: () =>
     set((state) => ({

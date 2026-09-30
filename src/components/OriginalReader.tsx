@@ -35,10 +35,12 @@ export default function OriginalReader() {
   // 此处不再放重复控件——实测反馈两处缩放计数重复）。
   // 用户未手动设置过缩放（zoom=null）时，原版缺省 70%
   // （固定版式 100% 偏大，70% 更接近 PDF 阅读器惯例）；设置过则全形态用用户值。
-  const zoom = effectiveZoom(
-    useUiStore((s) => s.zoom),
-    useUiStore((s) => s.readerMode)
-  );
+  // 两相缩放：liveZoom 驱动容器/CSS 尺寸即时跟随（位图拉伸），renderScale
+  // 驱动 canvas 重绘（停顿后定稿，见 uiStore.renderZoom）
+  const readerMode = useUiStore((s) => s.readerMode);
+  const liveZoom = effectiveZoom(useUiStore((s) => s.zoom), readerMode);
+  // renderZoom 为 null（本会话尚未缩放过/重置后）→ 定稿值就是当前实时值
+  const renderScale = useUiStore((s) => s.renderZoom) ?? liveZoom;
   const zoomRef = useZoomWheel<HTMLDivElement>();
   const { pdf, error } = usePdfDocument(filePath);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -115,7 +117,7 @@ export default function OriginalReader() {
            * zoom=1 时宽 = wrapW-16 < 容器宽，居中且完整显示。 */
         <div
           className="mx-auto px-4 pb-16 pt-3"
-          style={{ width: wrapW > 0 ? (wrapW - 48) * zoom + 32 : undefined }}
+          style={{ width: wrapW > 0 ? (wrapW - 48) * liveZoom + 32 : undefined }}
         >
           {pages.map((p) => (
             <OriginalPage
@@ -124,7 +126,8 @@ export default function OriginalReader() {
               pageNo={p.page + 1}
               overlays={overlaysByPage.get(p.page) ?? []}
               wrapW={wrapW}
-              zoom={zoom}
+              liveZoom={liveZoom}
+              renderZoom={renderScale}
             />
           ))}
         </div>
@@ -134,27 +137,33 @@ export default function OriginalReader() {
   );
 }
 
-/** 单页：懒渲染 canvas + bbox overlay（多段） + 译文浮层 */
+/** 单页：懒渲染 canvas + bbox overlay（多段） + 译文浮层。
+ * 缩放两相：canvas 以 renderZoom（定稿值）栅格化；手势期间 CSS 按
+ * factor = liveZoom / layout.zoom 整页均匀拉伸（位图由浏览器缩放），
+ * 定稿重绘完成后 layout.zoom 收敛到 liveZoom，factor 回 1 无跳变 */
 function OriginalPage({
   pdf,
   pageNo,
   overlays,
   wrapW,
-  zoom,
+  liveZoom,
+  renderZoom,
 }: {
   pdf: any;
   pageNo: number;
   overlays: Overlay[];
   wrapW: number;
-  zoom: number;
+  liveZoom: number;
+  renderZoom: number;
 }) {
   // 懒渲染逻辑抽至 useLazyPage
   const { holderRef, canvasRef, layout, rotated } = useLazyPage({
     pdf,
     pageNo,
     renderW: wrapW,
-    zoom,
+    zoom: renderZoom,
   });
+  const factor = layout ? liveZoom / layout.zoom : 1;
   const [selected, setSelected] = useState<{ block: TextBlock; bb: BBox } | null>(
     null
   );
@@ -163,20 +172,28 @@ function OriginalPage({
     <div
       ref={holderRef}
       className="relative mb-6"
-      style={{ minHeight: layout ? layout.h + 28 : 920 }}
+      style={{ minHeight: layout ? layout.h * factor + 28 : 920 }}
       onMouseDown={() => setSelected(null)}
     >
       <div
         className="relative mx-auto bg-white shadow-md dark:shadow-black/50"
-        style={{ width: layout ? layout.w : undefined }}
+        style={{ width: layout ? layout.w * factor : undefined }}
       >
-        <canvas ref={canvasRef} className="block" />
+        <canvas
+          ref={canvasRef}
+          className="block"
+          style={
+            layout
+              ? { width: layout.w * factor, height: layout.h * factor }
+              : undefined
+          }
+        />
 
         {layout && !rotated && (
           <div className="absolute inset-0">
             {overlays.map((o, i) => {
               const bb = o.bb;
-              const s = layout.scale;
+              const s = layout.scale * factor;
               const has = !!o.block.translated;
               return (
                 <div
@@ -209,6 +226,7 @@ function OriginalPage({
                 block={selected.block}
                 bb={selected.bb}
                 layout={layout}
+                factor={factor}
                 onClose={() => setSelected(null)}
               />
             )}
@@ -233,18 +251,20 @@ function BlockCard({
   block,
   bb,
   layout,
+  factor,
   onClose,
 }: {
   block: TextBlock;
   bb: BBox;
   layout: PageLayout;
+  factor: number;
   onClose: () => void;
 }) {
-  const s = layout.scale;
-  const cardW = Math.min(380, Math.max(260, layout.w * 0.45));
-  const left = Math.min(Math.max(4, bb[0] * s), Math.max(4, layout.w - cardW - 4));
+  const s = layout.scale * factor;
+  const cardW = Math.min(380, Math.max(260, layout.w * factor * 0.45));
+  const left = Math.min(Math.max(4, bb[0] * s), Math.max(4, layout.w * factor - cardW - 4));
   const below = bb[3] * s + 6;
-  const top = below + 300 > layout.h ? Math.max(4, bb[1] * s - 306) : below;
+  const top = below + 300 > layout.h * factor ? Math.max(4, bb[1] * s - 306) : below;
 
   return (
     <div
