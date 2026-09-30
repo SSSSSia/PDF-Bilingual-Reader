@@ -599,6 +599,103 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
   );
 }
 
+/** 幽灵 span 剔除：BabelDOC 产物里混着大量「视觉不可见的文字」——重排前的
+ *  旧版段落/旧版译文、MDPI 等模板水印（画布上被后续内容覆盖或整体透明），
+ *  pdfjs 文字层照常为其建 span，拖选/全选时涂蓝显形为「重影」
+ *  （2026-09-30 用户截图，实验页对照验证删除 278/520）。
+ *  以画布位图为真值逐 span 采样，三轮判定后删除，宁漏勿误：
+ *  ① 矩形内无任何墨迹 → 删（纯被覆盖文字）；
+ *  ② 有墨但墨迹全部落在其它 span 矩形（外扩 4px）内 → 删（墨是可见邻居的，
+ *     幽灵错位半行擦到可见行笔画）；
+ *  ③ 自有墨迹全部集中在一条水平线上（y 跨度≤2px、x 跨度≥40% 宽）→ 删
+ *     （幽灵擦到表格横线/页眉线的墨）。可见文字字形有纵向跨度，不受③影响。 */
+function removeGhostSpans(
+  container: HTMLElement,
+  canvas: HTMLCanvasElement,
+  dpr: number
+): number {
+  const ctx = canvas.getContext("2d");
+  // 极端缩放下整页位图内存过大（>40M 像素），放弃剔除（宁要重影不卡渲染）
+  if (!ctx || canvas.width * canvas.height > 40_000_000) return 0;
+  let img: ImageData;
+  try {
+    img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  } catch {
+    return 0;
+  }
+  const W = img.width;
+  const D = img.data;
+  const cvr = canvas.getBoundingClientRect();
+  const live: { s: HTMLSpanElement; r: DOMRect }[] = [];
+  const cand: { s: HTMLSpanElement; r: DOMRect; darkPts: number[] }[] = [];
+  for (const s of [...container.querySelectorAll("span")]) {
+    const txt = (s.textContent || "").trim();
+    if (!txt) {
+      s.remove();
+      continue;
+    }
+    const r = s.getBoundingClientRect();
+    const x0 = Math.max(0, Math.floor((r.x - cvr.x) * dpr));
+    const y0 = Math.max(0, Math.floor((r.y - cvr.y) * dpr));
+    const w = Math.max(1, Math.floor(r.width * dpr));
+    const h = Math.max(1, Math.floor(r.height * dpr));
+    const nx = Math.min(8, Math.max(2, Math.floor(w / 3)));
+    const ny = Math.min(6, Math.max(2, Math.floor(h / 3)));
+    const darkPts: number[] = [];
+    for (let iy = 0; iy < ny; iy++) {
+      for (let ix = 0; ix < nx; ix++) {
+        const px = x0 + Math.floor(((ix + 0.5) * w) / nx);
+        const py = y0 + Math.floor(((iy + 0.5) * h) / ny);
+        if (px < 0 || py < 0 || px >= W || py >= img.height) continue;
+        const o = (py * W + px) * 4;
+        if (Math.max(D[o], D[o + 1], D[o + 2]) < 200) darkPts.push(px, py);
+      }
+    }
+    live.push({ s, r });
+    if (darkPts.length === 0) s.remove();
+    else cand.push({ s, r, darkPts });
+  }
+  const PAD = 4 * dpr;
+  let removed = 0;
+  for (const c of cand) {
+    const ownPts: number[] = [];
+    for (let k = 0; k < c.darkPts.length; k += 2) {
+      const px = c.darkPts[k];
+      const py = c.darkPts[k + 1];
+      let insideOther = false;
+      for (const { r: rr } of live) {
+        if (rr === c.r) continue;
+        const lx = rr.x - cvr.x;
+        const ly = rr.y - cvr.y;
+        if (
+          px >= lx - PAD && px <= lx + rr.width + PAD &&
+          py >= ly - PAD && py <= ly + rr.height + PAD
+        ) {
+          insideOther = true;
+          break;
+        }
+      }
+      if (!insideOther) ownPts.push(px, py);
+    }
+    let ghost = ownPts.length === 0;
+    if (!ghost && ownPts.length >= 2) {
+      let ya = Infinity, yb = -Infinity, xa = Infinity, xb = -Infinity;
+      for (let k = 0; k < ownPts.length; k += 2) {
+        ya = Math.min(ya, ownPts[k + 1]);
+        yb = Math.max(yb, ownPts[k + 1]);
+        xa = Math.min(xa, ownPts[k]);
+        xb = Math.max(xb, ownPts[k]);
+      }
+      if (yb - ya <= 2 * dpr && xb - xa >= c.r.width * dpr * 0.4) ghost = true;
+    }
+    if (ghost) {
+      c.s.remove();
+      removed++;
+    }
+  }
+  return removed;
+}
+
 /** 单页懒渲染 canvas + 透明文本层：进入视口附近才 raster，缩放变化重渲染。
  *  文本层与 canvas 像素对齐（透明文字），使排版对照可以拖选/复制——
  *  BabelDOC 产物是排版 PDF，canvas 栅格图本身无文字可选 */
@@ -670,6 +767,9 @@ function LazyPageCanvas({
               if (/\s$/.test(text.data)) text.data = text.data.replace(/\s+$/, "");
             }
           }
+          // 幽灵剔除：BabelDOC 产物含不可见旧版文字/水印，涂蓝显形为重影
+          const cv = canvasRef.current;
+          if (cv && !cancelled) removeGhostSpans(container, cv, dpr);
         } catch (e) {
           // 文本层失败不能静默：图片照常显示但无法选字，用户无从反馈、
           // 我们无从诊断——真实错误落 frontend.log（dev/安装包均持久化）
