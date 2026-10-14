@@ -53,6 +53,46 @@ def _is_rate_limit_error(msg: str) -> bool:
     return "429" in low or "ratelimit" in low or "rate limit" in low
 
 
+def _validate_translation(dual_path: str, input_path: str, lang_out: str) -> str | None:
+    """产物内容校验：原文可译而译文中文字符为零 → 判「翻译全部失败」。
+
+    BabelDOC 对段落级失败逐段回退保留原文（实测 401 Key 失效时整本静默
+    产出纯原文 PDF 且不报错），上层会把该产物当成功缓存——用户表现为
+    「翻译后没有译文」且修好 Key 后仍命中坏缓存（2026-10-14 实证）。
+    以内容为真值兜底拦截；校验自身异常一律放行，不误伤正常产出。
+    """
+    if lang_out != "zh":
+        return None
+    try:
+        import re
+
+        import pymupdf
+    except Exception:  # noqa: BLE001 —— 缺依赖时放弃校验
+        return None
+    try:
+        src = pymupdf.open(input_path)
+        src_chars = sum(len(page.get_text()) for page in src)
+        if src_chars < 200:
+            return None  # 纯扫描件/近空文档：本来就没有可译文本
+        cn = 0
+        out = pymupdf.open(dual_path)
+        for page in out:
+            cn += len(re.findall(r"[\u4e00-\u9fff]", page.get_text()))
+            if cn > 0:
+                break
+        if cn > 0:
+            return None
+        return (
+            "翻译产物校验失败：输出 PDF 中未检测到中文译文（翻译请求很可能全部失败）。"
+            "常见原因：① API Key 无效或已过期（日志特征 401 Token is invalid）——"
+            "请在 设置 中更新 SiliconFlow API Key 后重试；"
+            "② 网络不通或服务限流——稍后重试。"
+            "本次无效产物已自动删除，修复后重新生成即可。"
+        )
+    except Exception:  # noqa: BLE001 —— 校验失败不拦截正常产出
+        return None
+
+
 def _rss_mb() -> float:
     """当前进程 WorkingSet（MB）。仅 Windows（psapi）；失败/非 Windows 返回 0
     （主后端据此跳过告警）。子集：RSS 阈值告警的数据来源。"""
@@ -301,6 +341,13 @@ async def main() -> None:
         _force_exit()
     if not result or not result.get("dual") or not os.path.isfile(result["dual"]):
         _emit({"type": "error", "error": "dual PDF 产物未找到（事件流与产物看门狗均未命中）"})
+        _force_exit()
+    # 产物内容校验（Key 失效等全失败场景 BabelDOC 静默产出纯原文 PDF，
+    # 不拦截会被当成功缓存，用户表现为「翻译后没有译文」）
+    verr = _validate_translation(result["dual"], args.input, args.lang_out)
+    if verr:
+        _clean_partial_outputs(args.output_dir)  # 删坏产物，防缓存探测命中
+        _emit({"type": "error", "error": verr})
         _force_exit()
     _emit({"type": "finish", "dual": result["dual"], "mono": result["mono"]})
     _force_exit()

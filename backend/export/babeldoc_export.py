@@ -103,13 +103,46 @@ def _output_dir(cache_dir: str, pdf_hash: str, model: str) -> str:
     return os.path.join(cache_dir, "babeldoc", pdf_hash, _model_slug(model))
 
 
-def _find_cached_dual(out_dir: str) -> str | None:
-    """命中缓存：目录里已有 *.dual.pdf 即返回（BabelDOC 命名 <stem>.<wm>.<lang>.dual.pdf）。"""
+def _dual_valid(dual_path: str, file_path: str | None = None) -> bool:
+    """产物内容有效性：原文可译而译文零中文字符 → 无效。
+
+    拦截「翻译全部失败仍落缓存」的坏产物——实测 401 Key 失效时 BabelDOC
+    对段落级失败逐段回退保留原文，静默产出纯原文 PDF（2026-10-14 用户
+    实证「翻译后没有译文」且换 Key 后仍命中坏缓存）。worker 侧同款校验
+    兜新产物，本函数兜存量坏缓存：判无效即视为未命中，重新生成时
+    worker 重跑前清理会顺带删掉坏文件。校验自身异常一律按有效放行
+    （宁误开不误重翻）。
+    """
+    try:
+        import re
+
+        import pymupdf
+    except Exception:  # noqa: BLE001 —— 缺依赖时放弃校验
+        return True
+    try:
+        if file_path and os.path.isfile(file_path):
+            src = pymupdf.open(file_path)
+            if sum(len(page.get_text()) for page in src) < 200:
+                return True  # 纯扫描件/近空文档：本来就没有译文可言
+        doc = pymupdf.open(dual_path)
+        for page in doc:
+            if re.search(r"[\u4e00-\u9fff]", page.get_text()):
+                return True
+        return False
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _find_cached_dual(out_dir: str, file_path: str | None = None) -> str | None:
+    """命中缓存：目录里已有 *.dual.pdf 即返回（BabelDOC 命名 <stem>.<wm>.<lang>.dual.pdf）。
+    零译文的坏产物判未命中（见 _dual_valid），交由重新生成覆盖。"""
     if not os.path.isdir(out_dir):
         return None
     for name in sorted(os.listdir(out_dir)):
         if name.endswith(".dual.pdf"):
-            return os.path.join(out_dir, name)
+            path = os.path.join(out_dir, name)
+            if _dual_valid(path, file_path):
+                return path
     return None
 
 
@@ -210,8 +243,8 @@ async def start_export(
     pdf_hash = await asyncio.to_thread(file_hash, file_path)
     out_dir = _output_dir(cache_dir, pdf_hash, model)
 
-    # 缓存命中：产物已存在，直接返回 done（幂等，零成本）
-    cached_dual = _find_cached_dual(out_dir)
+    # 缓存命中：产物已存在且内容有效（零译文坏产物判未命中，走重新生成）
+    cached_dual = await asyncio.to_thread(_find_cached_dual, out_dir, file_path)
     if cached_dual:
         job_id = uuid.uuid4().hex
         job = {
@@ -454,7 +487,7 @@ async def check_cached(file_path: str, translate_config: dict, cache_dir: str) -
 
     pdf_hash = await asyncio.to_thread(file_hash, file_path)
     out_dir = _output_dir(cache_dir, pdf_hash, model)
-    dual = _find_cached_dual(out_dir)
+    dual = await asyncio.to_thread(_find_cached_dual, out_dir, file_path)
     return {
         "cached": bool(dual),
         "dual_path": dual or "",
