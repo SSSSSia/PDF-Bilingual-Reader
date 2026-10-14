@@ -227,3 +227,9 @@
 .textLayer ::selection {
   background: rgb(59 130 246 / 0.35);
 }
+
+/* 幽灵标记层（markGhostSpans 判定的不可见残留/重复层）：退出选区与
+   落点映射——原生拖选跳过 user-select:none 的 span，涂色不再出现 */
+.textLayer span[data-ghost] {
+  user-select: none;
+}

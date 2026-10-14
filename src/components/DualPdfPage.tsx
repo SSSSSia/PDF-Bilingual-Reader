@@ -335,7 +335,9 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
       const list: Pg[] = [];
       for (const layer of root.querySelectorAll(".textLayer")) {
         const spans = [...layer.querySelectorAll<Element>("span")].filter(
-          (s) => (s.textContent ?? "").length > 0,
+          (s) =>
+            (s.textContent ?? "").length > 0 &&
+            !s.hasAttribute("data-ghost"), // 幽灵标记层不参与落点映射
         );
         if (!spans.length) continue;
         const lr = layer.getBoundingClientRect();
@@ -605,38 +607,48 @@ function DualPdfViewer({ dualPath }: { dualPath: string }) {
   );
 }
 
-/** 幽灵 span 剔除：BabelDOC 产物里混着大量「视觉不可见的文字」——重排前的
- *  旧版段落/旧版译文、MDPI 等模板水印（画布上被后续内容覆盖或整体透明），
- *  pdfjs 文字层照常为其建 span，拖选/全选时涂蓝显形为「重影」
- *  （2026-09-30 用户截图，实验页对照验证删除 278/520）。
- *  以画布位图为真值逐 span 采样，三轮判定后删除，宁漏勿误：
- *  ① 矩形内无任何墨迹 → 删（纯被覆盖文字）；
- *  ② 有墨但墨迹全部落在其它 span 矩形（外扩 4px）内 → 删（墨是可见邻居的，
- *     幽灵错位半行擦到可见行笔画）；
- *  ③ 自有墨迹全部集中在一条水平线上（y 跨度≤2px、x 跨度≥40% 宽）→ 删
- *     （幽灵擦到表格横线/页眉线的墨）。可见文字字形有纵向跨度，不受③影响。 */
-function removeGhostSpans(
+/** 幽灵 span 标记：BabelDOC dual 产物的文字层不可控——混着「画布上看不见
+ *  的旧版残留」（重排前旧段落/旧译文、模板水印，涂蓝显形为重影）与「同文本
+ *  双套」（BabelDOC 写两遍文字、横向错位几 px～十几 px，拖选涂出双份错位蓝
+ *  条且选区文本双份膨胀，2026-10-14 用户截图）。
+ *  以画布位图为真值，只依两条结构性证据标记（不删除——可逆、且 posAt 与
+ *  原生选区经 data-ghost + user-select:none 双通道跳过）：
+ *  ① span 盒内零墨迹：被覆盖/未绘制的铁证 → 标记；
+ *  ② 与另一 span 交叠 ≥30%（以较小盒计）：正常排版 span 间交叠≈0（跨行盒
+ *     分离、同行水平相邻不重叠），大交叠只来自重复层/叠行 → 保留墨迹采样
+ *     多的一方（可见者），另一方标记。
+ *  位图自检：全页暗像素占比 <0.3% 视为渲染未就绪/异常，整轮放弃。
+ *  已知边界：BabelDOC 把部分文字转曲成图形（无文本对象）时，那些行天然
+ *  不在任何文字层里，拖选无法覆盖——非本函数职责，产物特性。 */
+function markGhostSpans(
   container: HTMLElement,
   canvas: HTMLCanvasElement,
   dpr: number
-): number {
+): void {
   const ctx = canvas.getContext("2d");
-  // 极端缩放下整页位图内存过大（>40M 像素），放弃剔除（宁要重影不卡渲染）
-  if (!ctx || canvas.width * canvas.height > 40_000_000) return 0;
+  if (!ctx || canvas.width * canvas.height > 40_000_000) return;
   let img: ImageData;
   try {
     img = ctx.getImageData(0, 0, canvas.width, canvas.height);
   } catch {
-    return 0;
+    return;
   }
   const W = img.width;
   const D = img.data;
+  let darkTotal = 0;
+  for (let i = 0; i < D.length; i += 4) {
+    if (Math.max(D[i], D[i + 1], D[i + 2]) < 200) darkTotal++;
+  }
+  if (darkTotal < W * img.height * 0.003) return; // 位图不可信，放弃
   const cvr = canvas.getBoundingClientRect();
-  const live: { s: HTMLSpanElement; r: DOMRect }[] = [];
-  const cand: { s: HTMLSpanElement; r: DOMRect; darkPts: number[] }[] = [];
+  const info: {
+    s: HTMLSpanElement;
+    r: DOMRect;
+    dark: number;
+    ghost: boolean;
+  }[] = [];
   for (const s of [...container.querySelectorAll("span")]) {
-    const txt = (s.textContent || "").trim();
-    if (!txt) {
+    if (!(s.textContent || "").trim()) {
       s.remove();
       continue;
     }
@@ -647,59 +659,40 @@ function removeGhostSpans(
     const h = Math.max(1, Math.floor(r.height * dpr));
     const nx = Math.min(8, Math.max(2, Math.floor(w / 3)));
     const ny = Math.min(6, Math.max(2, Math.floor(h / 3)));
-    const darkPts: number[] = [];
+    let dark = 0;
     for (let iy = 0; iy < ny; iy++) {
       for (let ix = 0; ix < nx; ix++) {
         const px = x0 + Math.floor(((ix + 0.5) * w) / nx);
         const py = y0 + Math.floor(((iy + 0.5) * h) / ny);
         if (px < 0 || py < 0 || px >= W || py >= img.height) continue;
         const o = (py * W + px) * 4;
-        if (Math.max(D[o], D[o + 1], D[o + 2]) < 200) darkPts.push(px, py);
+        if (Math.max(D[o], D[o + 1], D[o + 2]) < 200) dark++;
       }
     }
-    live.push({ s, r });
-    if (darkPts.length === 0) s.remove();
-    else cand.push({ s, r, darkPts });
+    info.push({ s, r, dark, ghost: false });
   }
-  const PAD = 4 * dpr;
-  let removed = 0;
-  for (const c of cand) {
-    const ownPts: number[] = [];
-    for (let k = 0; k < c.darkPts.length; k += 2) {
-      const px = c.darkPts[k];
-      const py = c.darkPts[k + 1];
-      let insideOther = false;
-      for (const { r: rr } of live) {
-        if (rr === c.r) continue;
-        const lx = rr.x - cvr.x;
-        const ly = rr.y - cvr.y;
-        if (
-          px >= lx - PAD && px <= lx + rr.width + PAD &&
-          py >= ly - PAD && py <= ly + rr.height + PAD
-        ) {
-          insideOther = true;
-          break;
-        }
-      }
-      if (!insideOther) ownPts.push(px, py);
-    }
-    let ghost = ownPts.length === 0;
-    if (!ghost && ownPts.length >= 2) {
-      let ya = Infinity, yb = -Infinity, xa = Infinity, xb = -Infinity;
-      for (let k = 0; k < ownPts.length; k += 2) {
-        ya = Math.min(ya, ownPts[k + 1]);
-        yb = Math.max(yb, ownPts[k + 1]);
-        xa = Math.min(xa, ownPts[k]);
-        xb = Math.max(xb, ownPts[k]);
-      }
-      if (yb - ya <= 2 * dpr && xb - xa >= c.r.width * dpr * 0.4) ghost = true;
-    }
-    if (ghost) {
-      c.s.remove();
-      removed++;
+  for (const c of info) {
+    if (c.dark === 0) {
+      c.s.setAttribute("data-ghost", "1");
+      c.ghost = true;
     }
   }
-  return removed;
+  const alive = info.filter((c) => !c.ghost);
+  for (let i = 0; i < alive.length; i++) {
+    const a = alive[i];
+    if (a.ghost) continue;
+    for (let j = i + 1; j < alive.length; j++) {
+      const b = alive[j];
+      if (b.ghost) continue;
+      const ix = Math.max(0, Math.min(a.r.right, b.r.right) - Math.max(a.r.x, b.r.x));
+      const iy = Math.max(0, Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.y, b.r.y));
+      if (ix * iy >= 0.3 * Math.min(a.r.width * a.r.height, b.r.width * b.r.height)) {
+        const victim = a.dark >= b.dark ? b : a;
+        victim.s.setAttribute("data-ghost", "1");
+        victim.ghost = true;
+      }
+    }
+  }
 }
 
 /** 单页懒渲染 canvas + 透明文本层：进入视口附近才 raster，缩放变化重渲染。
@@ -801,7 +794,7 @@ function LazyPageCanvas({
           }
           // 幽灵剔除：BabelDOC 产物含不可见旧版文字/水印，涂蓝显形为重影
           const cv = canvasRef.current;
-          if (cv && !cancelled) removeGhostSpans(container, cv, dpr);
+          if (cv && !cancelled) markGhostSpans(container, cv, dpr);
         } catch (e) {
           // 文本层失败不能静默：图片照常显示但无法选字，用户无从反馈、
           // 我们无从诊断——真实错误落 frontend.log（dev/安装包均持久化）
